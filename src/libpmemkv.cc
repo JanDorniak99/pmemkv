@@ -766,12 +766,12 @@ int pmemkv_accessor_read_range(pmemkv_accessor *acc, size_t pos, size_t n,
 		return PMEMKV_STATUS_INVALID_ARGUMENT;
 
 	return catch_and_return_status(__func__, [&] {
-		std::cerr << "ppppo" << std::endl; 
+		std::cerr << "ppppo" << std::endl;
 		// auto ret = accessor_to_internal(acc)->read_range(pos, n);
 		auto accx = accessor_to_internal(acc);
-		std::cerr << "rrrrrr" << std::endl; 
+		std::cerr << "rrrrrr" << std::endl;
 		auto ret = accx->read_range(pos, n);
-		std::cerr << "zzzzzz" << std::endl; 
+		std::cerr << "zzzzzz" << std::endl;
 		*data = ret.first.begin();
 		*kb = ret.first.size();
 		return ret.second;

@@ -71,7 +71,7 @@ static void seek_test(pmem::kv::db &kv)
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek(p.first), pmem::kv::status::NOT_FOUND);
 		ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
-		//ASSERT VAL
+		// ASSERT VAL
 	});
 
 	insert_keys(kv);
@@ -269,7 +269,7 @@ static void test(int argc, char *argv[])
 			  seek_to_last_test<false>, next_test<true>, next_test<false>*/});
 
 	// if (argc < 4 || std::string(argv[3]).compare("false") != 0)
-	// 	run_engine_tests(argv[1], argv[2], {prev_test<true>, prev_test<false>});
+	// run_engine_tests(argv[1], argv[2], {prev_test<true>, prev_test<false>});
 }
 
 int main(int argc, char *argv[])

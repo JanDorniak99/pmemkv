@@ -58,8 +58,10 @@ class accessor_base {
 public:
 	virtual ~accessor_base() = default;
 
-	virtual std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos, size_t n) = 0;
-	virtual std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos, size_t n) = 0;
+	virtual std::pair<pmem::obj::slice<const char *>, status>
+	read_range(size_t pos, size_t n) = 0;
+	virtual std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos,
+									size_t n) = 0;
 
 	virtual status commit();
 	virtual void abort();

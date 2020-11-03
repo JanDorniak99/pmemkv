@@ -146,8 +146,10 @@ class radix::radix_accessor : public internal::non_volatile_accessor {
 public:
 	radix_accessor(container_type::iterator it, pmem::obj::pool_base &pop);
 
-	std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos, size_t n) final;
-	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos, size_t n) final;
+	std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos,
+								     size_t n) final;
+	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos,
+								size_t n) final;
 
 private:
 	container_type::iterator _it;
