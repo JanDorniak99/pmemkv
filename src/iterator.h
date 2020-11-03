@@ -6,6 +6,10 @@
 
 #include "libpmemkv.hpp"
 
+#include <libpmemobj++/pool.hpp>
+#include <libpmemobj++/slice.hpp>
+#include <libpmemobj++/transaction.hpp>
+
 namespace pmem
 {
 namespace kv
@@ -13,11 +17,10 @@ namespace kv
 namespace internal
 {
 
-/* XXX: make class abstract */
+class accessor_base;
+
 class iterator_base {
 public:
-	// iterator_base(); // in ctor, we might take global locks if necessary (e.g. for
-	// csmap)
 	virtual ~iterator_base() = default;
 
 	// iterator_base(const iterator_base&) = delete;
@@ -38,16 +41,39 @@ public:
 	virtual status next();
 	virtual status prev();
 
-	// result<string_view, status> key();
+	virtual std::pair<string_view, status> key() = 0;
 };
 
 template <bool IsConst>
 class iterator : public iterator_base {
-public:
-	// result<string_view, status> value(); // only for IsConst
+	using value_return_type =
+		typename std::conditional<IsConst, string_view,
+					  internal::accessor_base *>::type;
 
-	// result<accessor, status> value();    // only for !IsConst, starts a transaction
-	// TODO: should this function consume iterator?
+public:
+	virtual std::pair<value_return_type, status> value() = 0;
+};
+
+class accessor_base {
+public:
+	virtual ~accessor_base() = default;
+
+	virtual std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos, size_t n) = 0;
+	virtual std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos, size_t n) = 0;
+
+	virtual status commit();
+	virtual void abort();
+};
+
+class non_volatile_accessor : public accessor_base {
+public:
+	non_volatile_accessor(pmem::obj::pool_base &pop);
+
+	status commit() final;
+	void abort() final;
+
+private:
+	pmem::obj::transaction::manual _tx;
 };
 
 } /* namespace internal */

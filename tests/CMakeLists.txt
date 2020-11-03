@@ -678,7 +678,8 @@ if(ENGINE_CSMAP)
 	add_engine_test(ENGINE csmap
 			BINARY iterator_basic
 			TRACERS none memcheck pmemcheck
-			SCRIPT pmemobj_based/default.cmake)
+			SCRIPT pmemobj_based/default.cmake
+			PARAMS false)
 endif(ENGINE_CSMAP)
 ################################################################################
 ###################################### VCMAP ###################################

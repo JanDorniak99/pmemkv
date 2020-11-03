@@ -315,10 +315,8 @@ internal::iterator<true> *vsmap::new_const_iterator()
 template <bool IsConst>
 vsmap::vsmap_iterator<IsConst>::vsmap_iterator(container_type *c,
 					       vsmap::map_allocator_type *alloc)
+    : container(c), kv_allocator(alloc), _it(c->begin())
 {
-	container = c;
-	kv_allocator = alloc;
-	_it = container->begin();
 }
 
 template <bool IsConst>
@@ -428,6 +426,55 @@ status vsmap::vsmap_iterator<IsConst>::prev()
 	--_it;
 
 	return status::OK;
+}
+
+template <bool IsConst>
+std::pair<string_view, status> vsmap::vsmap_iterator<IsConst>::key()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {_it->first.data(), status::OK};
+}
+
+template <>
+std::pair<string_view, status> vsmap::vsmap_iterator<true>::value()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {{_it->second.data()}, status::OK};
+}
+
+template <>
+std::pair<internal::accessor_base *, status> vsmap::vsmap_iterator<false>::value()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {new vsmap_accessor{_it}, status::OK};
+}
+
+vsmap::vsmap_accessor::vsmap_accessor(map_type::iterator it) : _it(it)
+{
+}
+
+std::pair<pmem::obj::slice<const char *>, status>
+vsmap::vsmap_accessor::read_range(size_t pos, size_t n)
+{
+	if (pos + n > _it->second.size())
+		n = _it->second.size() - pos;
+
+	return {{_it->second.data() + pos, _it->second.data() + pos + n}, status::OK};
+}
+
+std::pair<pmem::obj::slice<char *>, status> vsmap::vsmap_accessor::write_range(size_t pos,
+									       size_t n)
+{
+	if (pos + n > _it->second.size())
+		n = _it->second.size() - pos;
+
+	return {{&(_it->second[0]) + pos, &(_it->second[0]) + pos + n}, status::OK};
 }
 
 } // namespace kv

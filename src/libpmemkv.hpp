@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <iostream>
+#include <libpmemobj++/slice.hpp>
 #include <libpmemobj++/string_view.hpp>
 #include <memory>
 #include <stdexcept>
@@ -211,6 +212,8 @@ class db {
 	template <bool IsConst>
 	class iterator;
 
+	class accessor;
+
 public:
 	using read_iterator = iterator<true>;
 	using write_iterator = iterator<false>;
@@ -284,6 +287,8 @@ template <bool IsConst>
 class db::iterator {
 	using iterator_type = typename std::conditional<IsConst, pmemkv_read_iterator,
 							pmemkv_write_iterator>::type;
+	using value_return_type =
+		typename std::conditional<IsConst, string_view, db::accessor>::type;
 
 public:
 	iterator(iterator_type *it);
@@ -301,8 +306,28 @@ public:
 	status next() noexcept;
 	status prev() noexcept;
 
+	std::pair<string_view, status> key() noexcept;
+	std::pair<value_return_type, status> value() noexcept;
+
 private:
 	iterator_type *_it;
+};
+
+class db::accessor {
+public:
+	accessor(pmemkv_accessor *acc);
+	~accessor();
+
+	// XXX: result<slice<InputIt>, status>
+	std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos,
+								     size_t n);
+	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos, size_t n);
+
+	status commit();
+	void abort();
+
+private:
+	pmemkv_accessor *_acc;
 };
 
 template <bool IsConst>
@@ -375,6 +400,71 @@ template <bool IsConst>
 status db::iterator<IsConst>::prev() noexcept
 {
 	return static_cast<status>(pmemkv_iterator_prev(static_cast<void *>(_it)));
+}
+
+template <bool IsConst>
+inline std::pair<string_view, status> db::iterator<IsConst>::key() noexcept
+{
+	const char *c;
+	size_t size;
+	auto s = pmemkv_iterator_key(static_cast<void *>(_it), &c, &size);
+	return {string_view{c, size}, static_cast<status>(s)};
+}
+
+template <>
+inline std::pair<string_view, status> db::iterator<true>::value() noexcept
+{
+	const char *c;
+	size_t size;
+	auto s = pmemkv_read_iterator_value(_it, &c, &size);
+	return {string_view{c, size}, static_cast<status>(s)};
+}
+
+template <>
+inline std::pair<db::accessor, status> db::iterator<false>::value() noexcept
+{
+	pmemkv_accessor *acc;
+	auto s = pmemkv_write_iterator_value(_it, &acc);
+	return {db::accessor{acc}, static_cast<status>(s)};
+}
+
+inline db::accessor::accessor(pmemkv_accessor *acc) : _acc(acc)
+{
+}
+
+inline db::accessor::~accessor()
+{
+	if (_acc)
+		pmemkv_accessor_delete(_acc);
+}
+
+inline std::pair<pmem::obj::slice<const char *>, status>
+db::accessor::read_range(size_t pos, size_t n)
+{
+	const char *data;
+	size_t size;
+	auto s = pmemkv_accessor_read_range(_acc, pos, n, &data, &size);
+	std::cerr << "xxxxxxxxxx" << std::endl;
+	return {{data, data + size}, static_cast<status>(s)};
+}
+
+inline std::pair<pmem::obj::slice<char *>, status> db::accessor::write_range(size_t pos,
+									     size_t n)
+{
+	char *data;
+	size_t size;
+	auto s = pmemkv_accessor_write_range(_acc, pos, n, &data, &size);
+	return {{data, data + size}, static_cast<status>(s)};
+}
+
+inline status db::accessor::commit()
+{
+	return static_cast<status>(pmemkv_accessor_commit(_acc));
+}
+
+inline void db::accessor::abort()
+{
+	pmemkv_accessor_abort(_acc);
 }
 
 /*! \namespace pmem::kv::internal

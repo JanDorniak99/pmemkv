@@ -27,6 +27,8 @@ class vsmap : public engine_base {
 	template <bool IsConst>
 	class vsmap_iterator;
 
+	class vsmap_accessor;
+
 public:
 	vsmap(std::unique_ptr<internal::config> cfg);
 	~vsmap();
@@ -80,6 +82,9 @@ private:
 template <bool IsConst>
 class vsmap::vsmap_iterator : public internal::iterator<IsConst> {
 	using container_type = vsmap::map_type;
+	using value_return_type =
+		typename std::conditional<IsConst, string_view,
+					  internal::accessor_base *>::type;
 
 public:
 	vsmap_iterator(container_type *container,
@@ -97,12 +102,25 @@ public:
 	status next() final;
 	status prev() final;
 
-	// result<string_view, status> key();
-	// result<accessor, status> value();
+	std::pair<string_view, status> key() final;
+	std::pair<value_return_type, status> value() final;
+
 private:
 	container_type *container;
 	vsmap::map_allocator_type *kv_allocator;
-	container_type::const_iterator _it;
+	container_type::iterator _it;
+};
+
+class vsmap::vsmap_accessor : public internal::accessor_base {
+public:
+	vsmap_accessor(map_type::iterator it);
+
+	std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos,
+								     size_t n) final;
+	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos, size_t n);
+
+private:
+	map_type::iterator _it;
 };
 
 } /* namespace kv */

@@ -40,6 +40,34 @@ status iterator_base::prev()
 	return status::NOT_SUPPORTED;
 }
 
+/* not supported for volatile engines */
+status accessor_base::commit()
+{
+	return status::NOT_SUPPORTED;
+}
+
+void accessor_base::abort()
+{
+	throw status::NOT_SUPPORTED;
+}
+
+/* for non volatile engines */
+non_volatile_accessor::non_volatile_accessor(pmem::obj::pool_base &pop) : _tx(pop)
+{
+}
+
+status non_volatile_accessor::commit()
+{
+	pmem::obj::transaction::commit();
+	return status::OK;
+}
+
+void non_volatile_accessor::abort()
+{
+	// XXX: errno
+	pmem::obj::transaction::abort(-1);
+}
+
 } /* namespace internal */
 } /* namespace kv */
 } /* namespace pmem */

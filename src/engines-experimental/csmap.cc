@@ -315,16 +315,8 @@ internal::iterator<true> *csmap::new_const_iterator()
 
 template <bool IsConst>
 csmap::csmap_iterator<IsConst>::csmap_iterator(container_type *c, global_mutex_type &mtx)
+    : container(c), _it(c->begin()), lock(mtx), pop(pmem::obj::pool_by_vptr(c))
 {
-	// lock = csmap::shared_global_lock_type(mtx);
-	container = c;
-	_it = container->begin();
-}
-
-template <bool IsConst>
-csmap::csmap_iterator<IsConst>::~csmap_iterator()
-{
-	// lock.unlock();
 }
 
 template <bool IsConst>
@@ -407,6 +399,58 @@ status csmap::csmap_iterator<IsConst>::next()
 		return status::NOT_FOUND;
 
 	return status::OK;
+}
+
+template <bool IsConst>
+std::pair<string_view, status> csmap::csmap_iterator<IsConst>::key()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {_it->first.cdata(), status::OK};
+}
+
+template <>
+std::pair<string_view, status> csmap::csmap_iterator<true>::value()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {{_it->second.val.data()}, status::OK};
+}
+
+template <>
+std::pair<internal::accessor_base *, status> csmap::csmap_iterator<false>::value()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {new csmap_accessor{_it, pop}, status::OK};
+}
+
+csmap::csmap_accessor::csmap_accessor(
+	container_type::iterator it,
+	pmem::obj::pool_base &pop)	  //, global_mutex_type &mtx)
+    : non_volatile_accessor(pop), _it(it) // , lock(mtx)
+{
+}
+
+std::pair<pmem::obj::slice<const char *>, status>
+csmap::csmap_accessor::read_range(size_t pos, size_t n)
+{
+	if (pos + n > _it->second.val.size())
+		n = _it->second.val.size() - pos;
+
+	return {_it->second.val.crange(pos, n), status::OK};
+}
+
+std::pair<pmem::obj::slice<char *>, status> csmap::csmap_accessor::write_range(size_t pos,
+									       size_t n)
+{
+	if (pos + n > _it->second.val.size())
+		n = _it->second.val.size() - pos;
+
+	return {_it->second.val.range(pos, n), status::OK};
 }
 
 } // namespace kv

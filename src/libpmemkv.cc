@@ -81,6 +81,18 @@ iterator_from_internal(pmem::kv::internal::iterator<IsConst> *it)
 		it);
 }
 
+static inline pmem::kv::internal::accessor_base *
+accessor_to_internal(pmemkv_accessor *acc)
+{
+	return reinterpret_cast<pmem::kv::internal::accessor_base *>(acc);
+}
+
+static inline pmemkv_accessor *
+accessor_from_internal(pmem::kv::internal::accessor_base *acc)
+{
+	return reinterpret_cast<pmemkv_accessor *>(acc);
+}
+
 template <typename Function>
 static inline int catch_and_return_status(const char *func_name, Function &&f)
 {
@@ -707,6 +719,110 @@ int pmemkv_iterator_prev(void *it)
 
 	return catch_and_return_status(__func__,
 				       [&] { return iterator_to_base(it)->prev(); });
+}
+
+int pmemkv_iterator_key(void *it, const char **k, size_t *kb)
+{
+	if (!it)
+		return PMEMKV_STATUS_INVALID_ARGUMENT;
+
+	return catch_and_return_status(__func__, [&] {
+		auto ret = iterator_to_base(it)->key();
+		*k = ret.first.data();
+		*kb = ret.first.size();
+		return ret.second;
+	});
+}
+
+int pmemkv_read_iterator_value(pmemkv_read_iterator *it, const char **val, size_t *kb)
+{
+	if (!it)
+		return PMEMKV_STATUS_INVALID_ARGUMENT;
+
+	return catch_and_return_status(__func__, [&] {
+		auto ret = iterator_to_internal(it)->value();
+		*val = ret.first.data();
+		*kb = ret.first.size();
+		return ret.second;
+	});
+}
+
+int pmemkv_write_iterator_value(pmemkv_write_iterator *it, pmemkv_accessor **acc)
+{
+	if (!it)
+		return PMEMKV_STATUS_INVALID_ARGUMENT;
+
+	return catch_and_return_status(__func__, [&] {
+		auto ret = iterator_to_internal(it)->value();
+		*acc = accessor_from_internal(ret.first);
+		return ret.second;
+	});
+}
+
+int pmemkv_accessor_read_range(pmemkv_accessor *acc, size_t pos, size_t n,
+			       const char **data, size_t *kb)
+{
+	if (!acc)
+		return PMEMKV_STATUS_INVALID_ARGUMENT;
+
+	return catch_and_return_status(__func__, [&] {
+		std::cerr << "ppppo" << std::endl; 
+		// auto ret = accessor_to_internal(acc)->read_range(pos, n);
+		auto accx = accessor_to_internal(acc);
+		std::cerr << "rrrrrr" << std::endl; 
+		auto ret = accx->read_range(pos, n);
+		std::cerr << "zzzzzz" << std::endl; 
+		*data = ret.first.begin();
+		*kb = ret.first.size();
+		return ret.second;
+	});
+}
+
+int pmemkv_accessor_write_range(pmemkv_accessor *acc, size_t pos, size_t n, char **data,
+				size_t *kb)
+{
+	if (!acc)
+		return PMEMKV_STATUS_INVALID_ARGUMENT;
+
+	return catch_and_return_status(__func__, [&] {
+		auto ret = accessor_to_internal(acc)->write_range(pos, n);
+		*data = ret.first.begin();
+		*kb = ret.first.size();
+		return ret.second;
+	});
+}
+
+int pmemkv_accessor_commit(pmemkv_accessor *acc)
+{
+	if (!acc)
+		return PMEMKV_STATUS_INVALID_ARGUMENT;
+
+	return catch_and_return_status(__func__, [&] {
+		auto s = accessor_to_internal(acc)->commit();
+		pmemkv_accessor_delete(acc);
+		return s;
+	});
+}
+
+void pmemkv_accessor_abort(pmemkv_accessor *acc)
+{
+	// XXX: check for errors
+	accessor_to_internal(acc)->abort();
+	pmemkv_accessor_delete(acc);
+}
+
+void pmemkv_accessor_delete(pmemkv_accessor *acc)
+{
+	if (!acc)
+		return;
+
+	try {
+		delete accessor_to_internal(acc);
+	} catch (const std::exception &exc) {
+		ERR() << exc.what();
+	} catch (...) {
+		ERR() << "Unspecified failure";
+	}
 }
 
 const char *pmemkv_errormsg(void)

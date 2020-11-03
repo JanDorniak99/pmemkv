@@ -60,6 +60,8 @@ class radix : public pmemobj_engine_base<internal::radix::pmem_type> {
 	template <bool IsConst>
 	class radix_iterator;
 
+	class radix_accessor;
+
 public:
 	radix(std::unique_ptr<internal::config> cfg);
 	~radix();
@@ -112,6 +114,9 @@ private:
 template <bool IsConst>
 class radix::radix_iterator : public internal::iterator<IsConst> {
 	using container_type = radix::container_type;
+	using value_return_type =
+		typename std::conditional<IsConst, string_view,
+					  internal::accessor_base *>::type;
 
 public:
 	radix_iterator(container_type *container);
@@ -128,10 +133,23 @@ public:
 	status next() final;
 	status prev() final;
 
-	// result<string_view, status> key();
-	// result<accessor, status> value();
+	std::pair<string_view, status> key() final;
+	std::pair<value_return_type, status> value() final;
+
 private:
 	container_type *container;
+	container_type::iterator _it;
+	pmem::obj::pool_base pop;
+};
+
+class radix::radix_accessor : public internal::non_volatile_accessor {
+public:
+	radix_accessor(container_type::iterator it, pmem::obj::pool_base &pop);
+
+	std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos, size_t n) final;
+	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos, size_t n) final;
+
+private:
 	container_type::iterator _it;
 };
 

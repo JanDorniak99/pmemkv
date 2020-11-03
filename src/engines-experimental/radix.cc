@@ -288,9 +288,8 @@ internal::iterator<true> *radix::new_const_iterator()
 
 template <bool IsConst>
 radix::radix_iterator<IsConst>::radix_iterator(container_type *c)
+    : container(c), _it(c->begin()), pop(pmem::obj::pool_by_vptr(c))
 {
-	container = c;
-	_it = container->begin();
 }
 
 template <bool IsConst>
@@ -396,6 +395,58 @@ status radix::radix_iterator<IsConst>::prev()
 	--_it;
 
 	return status::OK;
+}
+
+template <bool IsConst>
+std::pair<string_view, status> radix::radix_iterator<IsConst>::key()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {_it->key().cdata(), status::OK};
+}
+
+template <>
+std::pair<string_view, status> radix::radix_iterator<true>::value()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {{_it->value().data()}, status::OK};
+}
+
+template <>
+std::pair<internal::accessor_base *, status> radix::radix_iterator<false>::value()
+{
+	if (_it == container->end())
+		return {{}, status::NOT_FOUND};
+
+	return {new radix_accessor{_it, pop}, status::OK};
+}
+
+radix::radix_accessor::radix_accessor(container_type::iterator it,
+				      pmem::obj::pool_base &pop)
+    : non_volatile_accessor(pop), _it(it)
+{
+}
+
+std::pair<pmem::obj::slice<const char *>, status>
+radix::radix_accessor::read_range(size_t pos, size_t n)
+{
+	std::cerr << "123" << std::endl;
+	if (pos + n > _it->value().size())
+		n = _it->value().size() - pos;
+
+	return {{_it->value().cdata() + pos, _it->value().cdata() + pos + n}, status::OK};
+}
+
+std::pair<pmem::obj::slice<char *>, status> radix::radix_accessor::write_range(size_t pos,
+									       size_t n)
+{
+	if (pos + n > _it->value().size())
+		n = _it->value().size() - pos;
+
+	return {_it->value().range(pos, n), status::OK};
 }
 
 } // namespace kv

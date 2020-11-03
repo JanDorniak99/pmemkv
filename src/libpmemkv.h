@@ -122,22 +122,20 @@ int pmemkv_iterator_seek_to_last(void *it);
 int pmemkv_iterator_next(void *it);
 int pmemkv_iterator_prev(void *it);
 
-/*int pmemkv_iterator_key(void* it, const char** k, size_t* kb);
-int pmemkv_iterator_key(void *it, const char** k, size_t* kb);
+int pmemkv_iterator_key(void *it, const char **k, size_t *kb);
 
-int pmemkv_read_iterator_value(pmemkv_read_iterator* it, const char** val, size_t* kb);
-int pmemkv_write_iterator_value(pmemkv_write_iterator* it, pmemkv_accessor** acc);
+int pmemkv_read_iterator_value(pmemkv_read_iterator *it, const char **val, size_t *kb);
+int pmemkv_write_iterator_value(pmemkv_write_iterator *it, pmemkv_accessor **acc);
 
-int pmemkv_accessor_read_range(pmemkv_accessor* acc, size_t pos, size_t n, const char**
-data, size_t *kb); int pmemkv_accessor_write_range(pmemkv_accessor* acc, size_t pos,
-size_t n, char** data, size_t *kb);
+int pmemkv_accessor_read_range(pmemkv_accessor *acc, size_t pos, size_t n,
+			       const char **data, size_t *kb);
+int pmemkv_accessor_write_range(pmemkv_accessor *acc, size_t pos, size_t n, char **data,
+				size_t *kb);
 
-// both commit and abort will consume the iterator (destroy it)
-int pmemkv_accessor_commit(pmemkv_accessor*);
-void pmemkv_accessor_abort(pmemkv_accessor*);
+int pmemkv_accessor_commit(pmemkv_accessor *acc);
+void pmemkv_accessor_abort(pmemkv_accessor *acc);
 
-// void pmemkv_accessor_delete(pmemkv_accessor*); // probably not needed if commit/abort
-consumes the iterator*/
+void pmemkv_accessor_delete(pmemkv_accessor *acc); // needed for volatile engines?
 
 const char *pmemkv_errormsg(void);
 

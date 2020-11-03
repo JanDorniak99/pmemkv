@@ -47,6 +47,8 @@ private:
 	template <bool IsConst>
 	class stree_iterator;
 
+	class stree_accessor;
+
 public:
 	stree(std::unique_ptr<internal::config> cfg);
 	~stree();
@@ -91,6 +93,9 @@ private:
 template <bool IsConst>
 class stree::stree_iterator : public internal::iterator<IsConst> {
 	using container_type = stree::container_type;
+	using value_return_type =
+		typename std::conditional<IsConst, string_view,
+					  internal::accessor_base *>::type;
 
 public:
 	stree_iterator(container_type *container);
@@ -107,11 +112,25 @@ public:
 	status next() final;
 	status prev() final;
 
-	// result<string_view, status> key();
-	// result<accessor, status> value();
+	std::pair<string_view, status> key() final;
+	std::pair<value_return_type, status> value() final;
+
 private:
 	container_type *container;
-	container_type::const_iterator _it = container_type::const_iterator(nullptr);
+	container_type::iterator _it;
+	pmem::obj::pool_base pop;
+};
+
+class stree::stree_accessor : public internal::non_volatile_accessor {
+public:
+	stree_accessor(container_type::iterator it, pmem::obj::pool_base &pop);
+
+	std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos,
+								     size_t n) final;
+	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos, size_t n);
+
+private:
+	container_type::iterator _it;
 };
 
 } /* namespace kv */

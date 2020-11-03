@@ -11,6 +11,11 @@ using iterator = typename std::conditional<IsConst, pmem::kv::db::read_iterator,
 
 using pair = std::pair<std::string, std::string>;
 
+template <bool IsConst = true>
+using key_result = std::pair<typename std::conditional<IsConst, pmem::kv::string_view,
+						       pmem::kv::db::accessor>::type,
+			     pmem::kv::status>;
+
 static std::vector<pair> keys{{"aaa", "1"}, {"bbb", "2"}, {"ccc", "3"},	 {"rrr", "4"},
 			      {"sss", "5"}, {"ttt", "6"}, {"yyy", "记!"}};
 
@@ -19,6 +24,31 @@ static void insert_keys(pmem::kv::db &kv)
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(kv.put(p.first, p.second), pmem::kv::status::OK);
 	});
+}
+
+static void verify_key(key_result<> result, pmem::kv::string_view expected)
+{
+	ASSERT_STATUS(result.second, pmem::kv::status::OK);
+	UT_ASSERTeq(expected.compare(result.first), 0);
+}
+
+template <bool IsConst>
+static typename std::enable_if_t<IsConst> verify_value(key_result<IsConst> result,
+						       pmem::kv::string_view expected)
+{
+	ASSERT_STATUS(result.second, pmem::kv::status::OK);
+	UT_ASSERTeq(expected.compare(result.first), 0);
+}
+
+template <bool IsConst>
+static typename std::enable_if_t<!IsConst> verify_value(key_result<IsConst> result,
+							pmem::kv::string_view expected)
+{
+	ASSERT_STATUS(result.second, pmem::kv::status::OK);
+	auto read_res = result.first.read_range(0, 1);
+	std::cerr << "Aaaaaaaaaaaaaa" << std::endl;
+	ASSERT_STATUS(read_res.second, pmem::kv::status::OK);
+	UT_ASSERTeq(expected.compare(pmem::kv::string_view{read_res.first.begin()}), 0);
 }
 
 template <bool IsConst>
@@ -34,243 +64,212 @@ typename std::enable_if<!IsConst, iterator<IsConst>>::type new_iterator(pmem::kv
 }
 
 template <bool IsConst>
-static void seek_test(std::string engine, pmem::kv::config &&config)
+static void seek_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek(p.first), pmem::kv::status::NOT_FOUND);
+		ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
+		//ASSERT VAL
 	});
 
 	insert_keys(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek(p.first), pmem::kv::status::OK);
-		// XXX: ASSERT(it.value() == p.second and it.key() == p.first)
+		verify_key(it.key(), p.first);
+		verify_value<IsConst>(it.value(), p.second);
 	});
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void seek_lower_test(std::string engine, pmem::kv::config &&config)
+static void seek_lower_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_lower(p.first), pmem::kv::status::NOT_FOUND);
+		ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 	});
 
 	insert_keys(kv);
 
 	ASSERT_STATUS(it.seek_lower(keys[0].first), pmem::kv::status::NOT_FOUND);
 
+	auto prev_key = keys.begin();
 	std::for_each(keys.begin() + 1, keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_lower(p.first), pmem::kv::status::OK);
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), (prev_key++)->first);
+		// XXX: ASSERT(it.value())
 	});
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void seek_lower_eq_test(std::string engine, pmem::kv::config &&config)
+static void seek_lower_eq_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_lower_eq(p.first), pmem::kv::status::NOT_FOUND);
+		ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 	});
 
 	insert_keys(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_lower_eq(p.first), pmem::kv::status::OK);
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), p.first);
+		// XXX: ASSERT(it.value())
 	});
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void seek_higher_test(std::string engine, pmem::kv::config &&config)
+static void seek_higher_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_higher(p.first), pmem::kv::status::NOT_FOUND);
+		ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 	});
 
 	insert_keys(kv);
 
+	auto next_key = keys.begin() + 1;
 	std::for_each(keys.begin(), keys.end() - 1, [&](pair p) {
 		ASSERT_STATUS(it.seek_higher(p.first), pmem::kv::status::OK);
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), (next_key++)->first);
+		// XXX: ASSERT(it.value())
 	});
 
 	ASSERT_STATUS(it.seek_higher(keys[keys.size() - 1].first),
 		      pmem::kv::status::NOT_FOUND);
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void seek_higher_eq_test(std::string engine, pmem::kv::config &&config)
+static void seek_higher_eq_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_higher_eq(p.first), pmem::kv::status::NOT_FOUND);
+		ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 	});
 
 	insert_keys(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_higher_eq(p.first), pmem::kv::status::OK);
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), p.first);
+		// XXX: ASSERT(it.value())
 	});
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void seek_to_first_test(std::string engine, pmem::kv::config &&config)
+static void seek_to_first_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::NOT_FOUND);
+	ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 
 	insert_keys(kv);
 
 	ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::OK);
 
+	auto first_key = keys.begin();
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek(p.first), pmem::kv::status::OK);
 		ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::OK);
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), first_key->first);
+		// XXX: ASSERT(it.value())
 	});
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void seek_to_last_test(std::string engine, pmem::kv::config &&config)
+static void seek_to_last_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.seek_to_last(), pmem::kv::status::NOT_FOUND);
+	ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 
 	insert_keys(kv);
 
 	ASSERT_STATUS(it.seek_to_last(), pmem::kv::status::OK);
 
+	auto last_key = --keys.end();
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek(p.first), pmem::kv::status::OK);
 		ASSERT_STATUS(it.seek_to_last(), pmem::kv::status::OK);
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), last_key->first);
+		// XXX: ASSERT(it.value())
 	});
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void next_test(std::string engine, pmem::kv::config &&config)
+static void next_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.next(), pmem::kv::status::NOT_FOUND);
+	ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 
 	insert_keys(kv);
 
 	ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::OK);
 
 	std::for_each(keys.begin(), keys.end() - 1, [&](pair p) {
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), p.first);
+		// XXX: ASSERT(it.value())
 		ASSERT_STATUS(it.next(), pmem::kv::status::OK);
 	});
 
-	// XXX: ASSERT(it.value() and it.key())
+	verify_key(it.key(), (--keys.end())->first);
+	// XXX: ASSERT(it.value())
 	ASSERT_STATUS(it.next(), pmem::kv::status::NOT_FOUND);
-
-	CLEAR_KV(kv);
 }
 
 template <bool IsConst>
-static void prev_test(std::string engine, pmem::kv::config &&config)
+static void prev_test(pmem::kv::db &kv)
 {
-	auto kv = INITIALIZE_KV(engine, std::move(config));
-
 	auto it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.prev(), pmem::kv::status::NOT_FOUND);
+	ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
 
 	insert_keys(kv);
 
 	ASSERT_STATUS(it.seek_to_last(), pmem::kv::status::OK);
 
 	std::for_each(keys.rbegin(), keys.rend() - 1, [&](pair p) {
-		// XXX: ASSERT(it.value() and it.key())
+		verify_key(it.key(), p.first);
+		// XXX: ASSERT(it.value())
 		ASSERT_STATUS(it.prev(), pmem::kv::status::OK);
 	});
 
-	// XXX: ASSERT(it.value() and it.key())
+	verify_key(it.key(), keys.begin()->first);
+	// XXX: ASSERT(it.value())
 	ASSERT_STATUS(it.prev(), pmem::kv::status::NOT_FOUND);
-
-	CLEAR_KV(kv);
 }
 
 static void test(int argc, char *argv[])
 {
 	if (argc < 3)
-		UT_FATAL("usage: %s engine json_config", argv[0]);
+		UT_FATAL("usage: %s engine json_config [if_test_prev]", argv[0]);
 
-	auto engine = std::string(argv[1]);
+	run_engine_tests(argv[1], argv[2],
+			 {seek_test<true>, seek_test<false>, //seek_lower_test<true>,
+			  /*seek_lower_test<false>, seek_lower_eq_test<true>,
+			  seek_lower_eq_test<false>, seek_higher_test<true>,
+			  seek_higher_test<false>, seek_higher_eq_test<true>,
+			  seek_higher_eq_test<false>, seek_to_first_test<true>,
+			  seek_to_first_test<false>, seek_to_last_test<true>,
+			  seek_to_last_test<false>, next_test<true>, next_test<false>*/});
 
-	seek_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	seek_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	seek_lower_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	seek_lower_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	seek_lower_eq_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	seek_lower_eq_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	seek_higher_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	seek_higher_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	seek_higher_eq_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	seek_higher_eq_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	seek_to_first_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	seek_to_first_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	seek_to_last_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	seek_to_last_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	next_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-	next_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-
-	// XXX
-	if (engine != "csmap") {
-		prev_test<true>(engine, CONFIG_FROM_JSON(argv[2]));
-		prev_test<false>(engine, CONFIG_FROM_JSON(argv[2]));
-	}
+	// if (argc < 4 || std::string(argv[3]).compare("false") != 0)
+	// 	run_engine_tests(argv[1], argv[2], {prev_test<true>, prev_test<false>});
 }
 
 int main(int argc, char *argv[])
