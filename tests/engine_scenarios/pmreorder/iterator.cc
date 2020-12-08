@@ -5,19 +5,20 @@
  * iterator.cc -- iterator pmreorder test
  */
 
-#include "unittest.hpp"
+#include "../all/iterator.hpp"
+#include "../common/unittest.hpp"
 
 static constexpr int len_elements = 20;
 
 static void check_exist(pmem::kv::db &kv, const std::string &key,
 			const std::string &value)
 {
-	auto it = kv.new_read_iterator();
+	auto &it = new_iterator<true>(kv);
 	UT_ASSERTeq(it.seek(key), pmem::kv::status::OK);
 
-	auto res = it.read_range(0, std::numeric_limits<size_t>::max());
-	ASSERT_STATUS(res.second, pmem::kv::status::OK);
-	UT_ASSERTeq(value.compare(res.first.begin()), 0);
+	auto res = it.read_range();
+	UT_ASSERT(res.is_ok());
+	UT_ASSERTeq(value.compare(res.get_value().begin()), 0);
 }
 
 static void test_init(pmem::kv::db &kv)
@@ -33,7 +34,7 @@ static void test_init(pmem::kv::db &kv)
 /* write first element's value to 'x' */
 static void test_write(pmem::kv::db &kv)
 {
-	auto it = kv.new_write_iterator();
+	auto &it = new_iterator<false>(kv);
 
 	std::size_t size;
 	ASSERT_STATUS(kv.count_all(size), pmem::kv::status::OK);
@@ -41,9 +42,9 @@ static void test_write(pmem::kv::db &kv)
 
 	ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::OK);
 
-	auto res = it.write_range(0, std::numeric_limits<size_t>::max());
-	ASSERT_STATUS(res.second, pmem::kv::status::OK);
-	for (auto &c : res.first)
+	auto res = it.write_range();
+	UT_ASSERT(res.is_ok());
+	for (auto &c : res.get_value())
 		c = 'x';
 	it.commit();
 
@@ -52,7 +53,7 @@ static void test_write(pmem::kv::db &kv)
 
 static void check_consistency(pmem::kv::db &kv)
 {
-	auto it = kv.new_read_iterator();
+	auto &it = new_iterator<true>(kv);
 
 	std::size_t size;
 	ASSERT_STATUS(kv.count_all(size), pmem::kv::status::OK);
@@ -68,9 +69,9 @@ static void check_consistency(pmem::kv::db &kv)
 
 	/* check first element's value */
 	ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::OK);
-	auto res = it.read_range(0, std::numeric_limits<size_t>::max());
-	ASSERT_STATUS(res.second, pmem::kv::status::OK);
-	std::string value = res.first.begin();
+	auto res = it.read_range();
+	UT_ASSERT(res.is_ok());
+	std::string value = res.get_value().data();
 	UT_ASSERT(value.compare(std::string(len_elements, (char)10)) == 0 ||
 		  value.compare(std::string(len_elements, 'x')) == 0);
 

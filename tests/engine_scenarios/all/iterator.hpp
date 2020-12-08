@@ -25,34 +25,32 @@ template <bool IsConst>
 void verify_key(iterator<IsConst> &it, pmem::kv::string_view expected)
 {
 	auto result = it.key();
-	ASSERT_STATUS(result.second, pmem::kv::status::OK);
-	UT_ASSERTeq(expected.compare(result.first), 0);
+	UT_ASSERT(result.is_ok());
+	UT_ASSERTeq(expected.compare(result.get_value()), 0);
 }
 
 template <bool IsConst>
 void verify_value(iterator<IsConst> &it, pmem::kv::string_view expected)
 {
-	auto result = it.read_range(0, std::numeric_limits<size_t>::max());
-	ASSERT_STATUS(result.second, pmem::kv::status::OK);
-	UT_ASSERTeq(expected.compare(pmem::kv::string_view{result.first.begin()}), 0);
+	auto result = it.read_range();
+	UT_ASSERT(result.is_ok());
+	UT_ASSERTeq(expected.compare(result.get_value()), 0);
 }
 
 template <bool IsConst>
-void verify_not_found(iterator<IsConst> &it)
+	typename std::enable_if<IsConst, iterator<IsConst>>::type&
+new_iterator(pmem::kv::db &kv)
 {
-	ASSERT_STATUS(it.key().second, pmem::kv::status::NOT_FOUND);
-	ASSERT_STATUS(it.read_range(0, std::numeric_limits<size_t>::max()).second,
-		      pmem::kv::status::NOT_FOUND);
+	auto res = kv.new_read_iterator();
+	UT_ASSERT(res.is_ok());
+	return res.get_value();
 }
 
 template <bool IsConst>
-typename std::enable_if<IsConst, iterator<IsConst>>::type new_iterator(pmem::kv::db &kv)
+	typename std::enable_if<!IsConst, iterator<IsConst>>::type&
+new_iterator(pmem::kv::db &kv)
 {
-	return kv.new_read_iterator();
-}
-
-template <bool IsConst>
-typename std::enable_if<!IsConst, iterator<IsConst>>::type new_iterator(pmem::kv::db &kv)
-{
-	return kv.new_write_iterator();
+	auto res = kv.new_write_iterator();
+	UT_ASSERT(res.is_ok());
+	return res.get_value();
 }

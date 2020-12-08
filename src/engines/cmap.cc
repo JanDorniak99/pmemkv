@@ -155,7 +155,7 @@ cmap::cmap_iterator<false>::cmap_iterator(container_type *c)
 
 status cmap::cmap_iterator<true>::seek(string_view key)
 {
-	_acc.release();
+	init_seek();
 
 	if (container->find(_acc, key))
 		return status::OK;
@@ -165,8 +165,7 @@ status cmap::cmap_iterator<true>::seek(string_view key)
 
 std::pair<string_view, status> cmap::cmap_iterator<true>::key()
 {
-	if (_acc.empty())
-		return {{}, status::NOT_FOUND};
+	assert(!_acc.empty());
 
 	return {{_acc->first.c_str()}, status::OK};
 }
@@ -174,8 +173,7 @@ std::pair<string_view, status> cmap::cmap_iterator<true>::key()
 std::pair<pmem::obj::slice<const char *>, status>
 cmap::cmap_iterator<true>::read_range(size_t pos, size_t n)
 {
-	if (_acc.empty())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
+	assert(!_acc.empty());
 
 	if (pos + n > _acc->second.size() || pos + n < pos)
 		n = _acc->second.size() - pos;
@@ -186,31 +184,19 @@ cmap::cmap_iterator<true>::read_range(size_t pos, size_t n)
 std::pair<pmem::obj::slice<char *>, status>
 cmap::cmap_iterator<false>::write_range(size_t pos, size_t n)
 {
-	if (_acc.empty())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
-
-	/* check if position of iterator changed */
-	auto key = _acc->first.c_str();
-	if (snapshotted_key.compare(key) != 0) {
-		abort();
-		snapshotted_key = key;
-	}
+	assert(!_acc.empty());
 
 	if (pos + n > _acc->second.size() || pos + n < pos)
 		n = _acc->second.size() - pos;
 
 	log.push_back({std::string(_acc->second.c_str() + pos, n), pos});
-	auto &val = log[log.size() - 1].first;
+	auto &val = log.back().first;
 
 	return {{&val[0], &val[n]}, status::OK};
 }
 
 status cmap::cmap_iterator<false>::commit()
 {
-	/* check if position of iterator changed before commit */
-	if (snapshotted_key.compare(_acc->first.c_str()) != 0)
-		abort();
-
 	pmem::obj::transaction::run(pop, [&] {
 		for (auto &p : log) {
 			auto dest = _acc->second.range(p.second, p.first.size());
@@ -218,7 +204,13 @@ status cmap::cmap_iterator<false>::commit()
 		}
 	});
 	log.clear();
+
 	return status::OK;
+}
+
+void cmap::cmap_iterator<false>::abort()
+{
+	log.clear();
 }
 
 } // namespace kv

@@ -45,6 +45,7 @@ LIBPMEMKV_1.0 {
 		pmemkv_get_equal_above;
 		pmemkv_get_equal_below;
 		pmemkv_iterator_delete;
+		pmemkv_iterator_is_next;
 		pmemkv_iterator_key;
 		pmemkv_iterator_next;
 		pmemkv_iterator_prev;
@@ -62,6 +63,7 @@ LIBPMEMKV_1.0 {
 		pmemkv_read_iterator_new;
 		pmemkv_write_iterator_abort;
 		pmemkv_write_iterator_commit;
+		pmemkv_write_iterator_delete;
 		pmemkv_write_iterator_new;
 		pmemkv_write_iterator_write_range;
 	local:

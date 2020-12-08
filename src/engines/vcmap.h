@@ -81,8 +81,7 @@ protected:
 };
 
 template <>
-class vcmap::vcmap_iterator<false> : public vcmap::vcmap_iterator<true>,
-				     public internal::write_iterator_base {
+class vcmap::vcmap_iterator<false> : public vcmap::vcmap_iterator<true> {
 	using container_type = vcmap::map_t;
 	using ch_allocator_t = memkind_ns::allocator<char>;
 
@@ -92,6 +91,10 @@ public:
 	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos,
 								size_t n) final;
 	status commit() final;
+	void abort() final;
+
+private:
+	std::vector<std::pair<std::string, size_t>> log;
 };
 
 } /* namespace kv */

@@ -4,6 +4,7 @@
 #ifndef LIBPMEMKV_HPP
 #define LIBPMEMKV_HPP
 
+#include <cassert>
 #include <functional>
 #include <iostream>
 #include <libpmemobj++/slice.hpp>
@@ -124,6 +125,260 @@ inline std::ostream &operator<<(std::ostream &os, const status &s)
 	os << statuses[status_no] << " (" << status_no << ")";
 
 	return os;
+}
+
+/*! \exception bad_result_access
+	\brief Defines a type of object to be thrown by result::get_value() when
+   result doesn't contain value.
+ */
+class bad_result_access : public std::exception {
+public:
+	const char *what() const noexcept final
+	{
+		return "bad_result_access (value doesn't exist)";
+	}
+};
+
+/*! \class result
+	\brief Stores result of an operation. It always contains status and optionally can
+   contain value.
+	If result contains value: is_ok() returns true, get_value() returns value,
+   get_status() returns status::OK.
+	If result contains error: is_ok() returns false, get_value() throws
+   bad_result_access, get_status() returns status other than status::OK.
+ */
+template <typename OkType>
+class result {
+	union {
+		OkType value;
+	};
+
+	status s;
+
+public:
+	result(const OkType &val) noexcept(noexcept(OkType(std::declval<OkType>())));
+	result(const status &err) noexcept;
+	result(const result &other) noexcept(noexcept(OkType(std::declval<OkType>())));
+	result(result &&other) noexcept(noexcept(OkType(std::declval<OkType>())));
+	result(OkType &&val) noexcept(noexcept(OkType(std::declval<OkType>())));
+
+	~result();
+
+	result &operator=(const result &other) noexcept(
+		noexcept(std::declval<OkType>().~OkType()) &&
+		noexcept(OkType(std::declval<OkType>())));
+	result &
+	operator=(result &&other) noexcept(noexcept(std::declval<OkType>().~OkType()) &&
+					   noexcept(OkType(std::declval<OkType>())));
+
+	bool is_ok() const noexcept;
+
+	const OkType &get_value() const;
+	OkType &get_value();
+	status get_status() const noexcept;
+};
+
+/**
+ * Creates result with value (status is automatically initialized to status::OK).
+ *
+ * @param[in] val value.
+ */
+template <typename OkType>
+result<OkType>::result(const OkType &val) noexcept(
+	noexcept(OkType(std::declval<OkType>())))
+    : value(val), s(status::OK)
+{
+}
+
+/**
+ * Creates result which contains only status.
+ *
+ * @param[in] status status other than status::OK.
+ */
+template <typename OkType>
+result<OkType>::result(const status &status) noexcept : s(status)
+{
+	assert(s != status::OK);
+}
+
+/**
+ * Default copy constructor.
+ *
+ * @param[in] other result to copy.
+ */
+template <typename OkType>
+result<OkType>::result(const result &other) noexcept(
+	noexcept(OkType(std::declval<OkType>())))
+    : s(other.s)
+{
+	if (s == status::OK)
+		new (&value) OkType(other.value);
+}
+
+/**
+ * Default move constructor.
+ *
+ * @param[in] other result to move.
+ */
+template <typename OkType>
+result<OkType>::result(result &&other) noexcept(noexcept(OkType(std::declval<OkType>())))
+    : s(other.s)
+{
+	if (s == status::OK)
+		new (&value) OkType(std::move(other.value));
+
+	other.s = status::UNKNOWN_ERROR;
+}
+
+/**
+ * Explicit destructor
+ */
+template <typename OkType>
+result<OkType>::~result()
+{
+	if (s == status::OK)
+		value.~OkType();
+}
+
+/**
+ * Default copy assignment operator.
+ *
+ * @param[in] other result to copy.
+ */
+template <typename OkType>
+result<OkType> &result<OkType>::operator=(const result &other) noexcept(
+	noexcept(std::declval<OkType>().~OkType()) &&
+	noexcept(OkType(std::declval<OkType>())))
+{
+	if (s == status::OK && other.is_ok())
+		value = other.value;
+	else if (other.is_ok())
+		new (&value) OkType(other.value);
+	else if (s == status::OK)
+		value.~OkType();
+
+	s = other.s;
+
+	return *this;
+}
+
+/**
+ * Default move assignment operator.
+ *
+ * @param[in] other result to move.
+ */
+template <typename OkType>
+result<OkType> &result<OkType>::operator=(result &&other) noexcept(
+	noexcept(std::declval<OkType>().~OkType()) &&
+	noexcept(OkType(std::declval<OkType>())))
+{
+	if (s == status::OK && other.is_ok())
+		value = std::move(other.value);
+	else if (other.is_ok())
+		new (&value) OkType(std::move(other.value));
+	else if (s == status::OK)
+		value.~OkType();
+
+	s = other.s;
+	other.s = status::UNKNOWN_ERROR;
+
+	return *this;
+}
+
+/**
+ * Constructor with rvalue reference to OkType.
+ *
+ * @param[in] val rvalue reference to OkType
+ */
+template <typename OkType>
+result<OkType>::result(OkType &&val) noexcept(noexcept(OkType(std::declval<OkType>())))
+    : value(std::move(val)), s(status::OK)
+{
+}
+
+/**
+ * Checks if the result contains value (status == status::OK).
+ *
+ * @return bool
+ */
+template <typename OkType>
+bool result<OkType>::is_ok() const noexcept
+{
+	return s == status::OK;
+}
+
+/**
+ * Returns const reference to value from the result.
+ *
+ * If result doesn't contain value, throws bad_result_access.
+ *
+ * @throw bad_result_access
+ *
+ * @return const reference to value from the result.
+ */
+template <typename OkType>
+const OkType &result<OkType>::get_value() const
+{
+	if (s == status::OK)
+		return value;
+	else
+		throw bad_result_access();
+}
+
+/**
+ * Returns reference to value from the result.
+ *
+ * If result doesn't contain value, throws bad_result_access.
+ *
+ * @throw bad_result_access
+ *
+ * @return reference to value from the result
+ */
+template <typename OkType>
+OkType &result<OkType>::get_value()
+{
+	if (s == status::OK)
+		return value;
+	else
+		throw bad_result_access();
+}
+
+/**
+ * Returns status from the result.
+ *
+ * It returns status::OK if there is a value, and other status (with the appropriate
+ * 'error') if there isn't any value.
+ *
+ * @return status
+ */
+template <typename OkType>
+status result<OkType>::get_status() const noexcept
+{
+	return s;
+}
+
+template <typename OkType>
+bool operator==(const result<OkType> &lhs, const status &rhs)
+{
+	return lhs.get_status() == rhs;
+}
+
+template <typename OkType>
+bool operator==(const status &lhs, const result<OkType> &rhs)
+{
+	return lhs == rhs.get_status();
+}
+
+template <typename OkType>
+bool operator!=(const result<OkType> &lhs, const status &rhs)
+{
+	return lhs.get_status() != rhs;
+}
+
+template <typename OkType>
+bool operator!=(const status &lhs, const result<OkType> &rhs)
+{
+	return lhs != rhs.get_status();
 }
 
 /*! \class config
@@ -258,8 +513,8 @@ public:
 	status remove(string_view key) noexcept;
 	status defrag(double start_percent = 0, double amount_percent = 100);
 
-	write_iterator new_write_iterator();
-	read_iterator new_read_iterator();
+	result<write_iterator> new_write_iterator();
+	result<read_iterator> new_read_iterator();
 
 	std::string errormsg();
 
@@ -269,8 +524,11 @@ private:
 
 template <bool IsConst>
 class db::iterator {
-	using iterator_type = typename std::conditional<IsConst, pmemkv_read_iterator,
+	using iterator_type = typename std::conditional<IsConst, pmemkv_iterator,
 							pmemkv_write_iterator>::type;
+
+	template <typename T>
+	class OutputIterator;
 
 public:
 	iterator(iterator_type *it);
@@ -284,19 +542,18 @@ public:
 	status seek_to_first() noexcept;
 	status seek_to_last() noexcept;
 
+	status is_next() noexcept;
 	status next() noexcept;
 	status prev() noexcept;
 
-	// XXX: result<string_view, status>
-	std::pair<string_view, status> key() noexcept;
+	result<string_view> key() noexcept;
 
-	// XXX: result<slice<InputIt>, status>
-	std::pair<pmem::obj::slice<const char *>, status> read_range(size_t pos,
-								     size_t n);
+	result<string_view> read_range(size_t pos = 0,
+				       size_t n = std::numeric_limits<size_t>::max());
 
 	template <bool IC = IsConst>
-	typename std::enable_if<!IC, std::pair<pmem::obj::slice<char *>, status>>::type
-	write_range(size_t pos, size_t n);
+	typename std::enable_if<!IC, result<pmem::obj::slice<OutputIterator<char>>>>::type
+	write_range(size_t pos = 0, size_t n = std::numeric_limits<size_t>::max());
 
 	template <bool IC = IsConst>
 	typename std::enable_if<!IC, status>::type commit();
@@ -304,106 +561,306 @@ public:
 	typename std::enable_if<!IC>::type abort();
 
 private:
-	std::unique_ptr<iterator_type, decltype(&pmemkv_iterator_delete)> it_;
+	std::unique_ptr<
+		iterator_type,
+		typename std::conditional<IsConst, decltype(&pmemkv_iterator_delete),
+					  decltype(&pmemkv_write_iterator_delete)>::type>
+		it_;
+
+	pmemkv_iterator *get_raw_it();
 };
 
 template <bool IsConst>
-db::iterator<IsConst>::iterator(iterator_type *it) : it_(it, &pmemkv_iterator_delete)
+template <typename T>
+class db::iterator<IsConst>::OutputIterator {
+	struct assign_only;
+
+public:
+	using reference = assign_only &;
+	using pointer = void;
+	using difference_type = std::ptrdiff_t;
+	using value_type = void;
+	using iterator_category = std::output_iterator_tag;
+
+	OutputIterator(T *x) : ao(x)
+	{
+	}
+
+	reference operator*()
+	{
+		return ao;
+	}
+
+	OutputIterator &operator++()
+	{
+		ao.c += sizeof(T);
+		return *this;
+	}
+
+	OutputIterator operator++(int)
+	{
+		auto tmp = *this;
+		++(*this);
+		return tmp;
+	}
+
+	OutputIterator &operator--()
+	{
+		ao.c -= sizeof(T);
+		return *this;
+	}
+
+	OutputIterator operator--(int)
+	{
+		auto tmp = *this;
+		--(*this);
+		return tmp;
+	}
+
+	assign_only operator[](difference_type pos)
+	{
+		return assign_only(ao.c + pos);
+	}
+
+	difference_type operator-(const OutputIterator &other) const
+	{
+		return this->ao.c - other.ao.c;
+	}
+
+	bool operator!=(const OutputIterator &other)
+	{
+		return this->ao.c != other.ao.c;
+	}
+
+private:
+	struct assign_only {
+		friend OutputIterator<T>;
+
+		assign_only(T *x) : c(x)
+		{
+		}
+
+		assign_only &operator=(T x)
+		{
+			*c = x;
+			return *this;
+		}
+
+	private:
+		T *c;
+	};
+
+	assign_only ao;
+};
+
+template <>
+inline db::iterator<true>::iterator(iterator_type *it) : it_(it, &pmemkv_iterator_delete)
+{
+	std::cerr << "iterator constructor" << std::endl;
+	std::cerr << it_.get() << std::endl;
+	//std::cerr << this->get_raw_it() << std::endl;
+}
+
+template <>
+inline db::iterator<false>::iterator(iterator_type *it)
+    : it_(it, &pmemkv_write_iterator_delete)
 {
 }
 
+/**
+ * Changes iterator position to record with given *key*.
+ * If record is present and no error occurred, the function returns
+ * pmem::kv::status::OK. If record does not exist pmem::kv::status::NOT_FOUND
+ * is returned. Other possible return values are described in pmem::kv::status.
+ *
+ * It internally aborts all uncommitted changes in previous record.
+ *
+ * @param[in] key record's key to change position for
+ *
+ * @return pmem::kv::status
+ */
 template <bool IsConst>
-status db::iterator<IsConst>::seek(string_view key) noexcept
+inline status db::iterator<IsConst>::seek(string_view key) noexcept
 {
-	return static_cast<status>(pmemkv_iterator_seek(
-		static_cast<void *>(this->it_.get()), key.data(), key.size()));
+	std::cerr << it_.get() << std::endl;
+	std::cerr << get_raw_it() << std::endl;
+	return static_cast<status>(
+		pmemkv_iterator_seek(this->get_raw_it(), key.data(), key.size()));
 }
 
+/**
+ * Changes iterator position to record with key lower than given *key*.
+ * If record is present and no error occurred, the function returns
+ * pmem::kv::status::OK. If record does not exist pmem::kv::status::NOT_FOUND
+ * is returned. Other possible return values are described in pmem::kv::status.
+ *
+ * It internally aborts all uncommitted changes in previous record if position changed
+ * (previous record != new record).
+ *
+ * @param[in] key record's key to change position for
+ *
+ * @return pmem::kv::status
+ */
 template <bool IsConst>
-status db::iterator<IsConst>::seek_lower(string_view key) noexcept
+inline status db::iterator<IsConst>::seek_lower(string_view key) noexcept
 {
-	return static_cast<status>(pmemkv_iterator_seek_lower(
-		static_cast<void *>(this->it_.get()), key.data(), key.size()));
+	return static_cast<status>(
+		pmemkv_iterator_seek_lower(this->get_raw_it(), key.data(), key.size()));
 }
 
+/**
+ * Changes iterator position to record with key equal or lower than given *key*.
+ * If record is present and no error occurred, the function returns
+ * pmem::kv::status::OK. If record does not exist pmem::kv::status::NOT_FOUND
+ * is returned. Other possible return values are described in pmem::kv::status.
+ *
+ * It internally aborts all uncommitted changes in previous record if position changed
+ * (previous record != new record).
+ *
+ * @param[in] key record's key to change position for
+ *
+ * @return pmem::kv::status
+ */
 template <bool IsConst>
-status db::iterator<IsConst>::seek_lower_eq(string_view key) noexcept
+inline status db::iterator<IsConst>::seek_lower_eq(string_view key) noexcept
 {
-	return static_cast<status>(pmemkv_iterator_seek_lower_eq(
-		static_cast<void *>(this->it_.get()), key.data(), key.size()));
+	return static_cast<status>(pmemkv_iterator_seek_lower_eq(this->get_raw_it(),
+								 key.data(), key.size()));
 }
 
+/**
+ * Changes iterator position to record with key higher than given *key*.
+ * If record is present and no error occurred, the function returns
+ * pmem::kv::status::OK. If record does not exist pmem::kv::status::NOT_FOUND
+ * is returned. Other possible return values are described in pmem::kv::status.
+ *
+ * It internally aborts all uncommitted changes in previous record if position changed
+ * (previous record != new record).
+ *
+ * @param[in] key record's key to change position for
+ *
+ * @return pmem::kv::status
+ */
 template <bool IsConst>
-status db::iterator<IsConst>::seek_higher(string_view key) noexcept
+inline status db::iterator<IsConst>::seek_higher(string_view key) noexcept
 {
-	return static_cast<status>(pmemkv_iterator_seek_higher(
-		static_cast<void *>(this->it_.get()), key.data(), key.size()));
+	return static_cast<status>(
+		pmemkv_iterator_seek_higher(this->get_raw_it(), key.data(), key.size()));
 }
 
+/**
+ * Changes iterator position to record with key equal or higher than given *key*.
+ * If record is present and no error occurred, the function returns
+ * pmem::kv::status::OK. If record does not exist pmem::kv::status::NOT_FOUND
+ * is returned. Other possible return values are described in pmem::kv::status.
+ *
+ * It internally aborts all uncommitted changes in previous record if position changed
+ * (previous record != new record).
+ *
+ * @param[in] key record's key to change position for
+ *
+ * @return pmem::kv::status
+ */
 template <bool IsConst>
-status db::iterator<IsConst>::seek_higher_eq(string_view key) noexcept
+inline status db::iterator<IsConst>::seek_higher_eq(string_view key) noexcept
 {
 	return static_cast<status>(pmemkv_iterator_seek_higher_eq(
-		static_cast<void *>(this->it_.get()), key.data(), key.size()));
+		this->get_raw_it(), key.data(), key.size()));
 }
 
+/**
+ * Changes iterator position to first record.
+ * If db isn't empty, and no error occurred, the function returns
+ * pmem::kv::status::OK. If db is empty pmem::kv::status::NOT_FOUND
+ * is returned. Other possible return values are described in pmem::kv::status.
+ *
+ * It internally aborts all uncommitted changes in previous record if position changed
+ * (previous record != new record).
+ *
+ * @return pmem::kv::status
+ */
 template <bool IsConst>
-status db::iterator<IsConst>::seek_to_first() noexcept
+inline status db::iterator<IsConst>::seek_to_first() noexcept
 {
-	return static_cast<status>(
-		pmemkv_iterator_seek_to_first(static_cast<void *>(this->it_.get())));
+	return static_cast<status>(pmemkv_iterator_seek_to_first(this->get_raw_it()));
 }
 
+/**
+ * Changes iterator position to last record.
+ * If db isn't empty, and no error occurred, the function returns
+ * pmem::kv::status::OK. If db is empty pmem::kv::status::NOT_FOUND
+ * is returned. Other possible return values are described in pmem::kv::status.
+ *
+ * It internally aborts all uncommitted changes in previous record if position changed
+ * (previous record != new record).
+ *
+ * @return pmem::kv::status
+ */
 template <bool IsConst>
-status db::iterator<IsConst>::seek_to_last() noexcept
+inline status db::iterator<IsConst>::seek_to_last() noexcept
 {
-	return static_cast<status>(
-		pmemkv_iterator_seek_to_last(static_cast<void *>(this->it_.get())));
+	return static_cast<status>(pmemkv_iterator_seek_to_last(this->get_raw_it()));
 }
 
 template <bool IsConst>
-status db::iterator<IsConst>::next() noexcept
+inline status db::iterator<IsConst>::is_next() noexcept
 {
-	return static_cast<status>(
-		pmemkv_iterator_next(static_cast<void *>(this->it_.get())));
+	return static_cast<status>(pmemkv_iterator_is_next(this->get_raw_it()));
 }
 
 template <bool IsConst>
-status db::iterator<IsConst>::prev() noexcept
+inline status db::iterator<IsConst>::next() noexcept
 {
-	return static_cast<status>(
-		pmemkv_iterator_prev(static_cast<void *>(this->it_.get())));
+	return static_cast<status>(pmemkv_iterator_next(this->get_raw_it()));
 }
 
 template <bool IsConst>
-inline std::pair<string_view, status> db::iterator<IsConst>::key() noexcept
+inline status db::iterator<IsConst>::prev() noexcept
+{
+	return static_cast<status>(pmemkv_iterator_prev(this->get_raw_it()));
+}
+
+template <bool IsConst>
+inline result<string_view> db::iterator<IsConst>::key() noexcept
 {
 	const char *c;
 	size_t size;
-	auto s = pmemkv_iterator_key(static_cast<void *>(this->it_.get()), &c, &size);
-	return {string_view{c, size}, static_cast<status>(s)};
+	auto s = static_cast<status>(pmemkv_iterator_key(this->get_raw_it(), &c, &size));
+
+	if (s == status::OK)
+		return {string_view{c, size}};
+	else
+		return {s};
 }
 
 template <bool IsConst>
-inline std::pair<pmem::obj::slice<const char *>, status>
-db::iterator<IsConst>::read_range(size_t pos, size_t n)
+inline result<string_view> db::iterator<IsConst>::read_range(size_t pos, size_t n)
 {
 	const char *data;
 	size_t size;
-	auto s = pmemkv_iterator_read_range(static_cast<void *>(this->it_.get()), pos, n,
-					    &data, &size);
-	return {{data, data + size}, static_cast<status>(s)};
+	auto s = static_cast<status>(
+		pmemkv_iterator_read_range(this->get_raw_it(), pos, n, &data, &size));
+
+	if (s == status::OK)
+		return {string_view{data, size}};
+	else
+		return {s};
 }
 
 template <>
 template <>
-inline std::pair<pmem::obj::slice<char *>, status>
+inline result<pmem::obj::slice<db::iterator<false>::OutputIterator<char>>>
 db::iterator<false>::write_range(size_t pos, size_t n)
 {
 	char *data;
 	size_t size;
-	auto s = pmemkv_write_iterator_write_range(this->it_.get(), pos, n, &data, &size);
-	return {{data, data + size}, static_cast<status>(s)};
+	auto s = static_cast<status>(
+		pmemkv_write_iterator_write_range(this->it_.get(), pos, n, &data, &size));
+
+	if (s == status::OK)
+		return {{data, data + size}};
+	else
+		return {s};
 }
 
 template <>
@@ -419,6 +876,18 @@ template <>
 inline void db::iterator<false>::abort()
 {
 	pmemkv_write_iterator_abort(this->it_.get());
+}
+
+template <>
+inline pmemkv_iterator *db::iterator<true>::get_raw_it()
+{
+	return it_.get();
+}
+
+template <>
+inline pmemkv_iterator *db::iterator<false>::get_raw_it()
+{
+	return it_.get()->iter;
 }
 
 /*! \namespace pmem::kv::internal
@@ -1450,20 +1919,29 @@ inline status db::remove(string_view key) noexcept
  * @return pmem::kv::status
  */
 inline status db::defrag(double start_percent, double amount_percent)
-
 {
 	return static_cast<status>(
 		pmemkv_defrag(this->db_.get(), start_percent, amount_percent));
 }
 
-inline db::write_iterator db::new_write_iterator()
+inline result<db::write_iterator> db::new_write_iterator()
 {
-	return db::iterator<false>{pmemkv_write_iterator_new(db_.get())};
+	pmemkv_write_iterator *tmp;
+	auto ret = static_cast<status>(pmemkv_write_iterator_new(db_.get(), &tmp));
+	if (static_cast<status>(ret) == status::OK)
+		return {db::iterator<false>{tmp}};
+	else
+		return {ret};
 }
 
-inline db::read_iterator db::new_read_iterator()
+inline result<db::read_iterator> db::new_read_iterator()
 {
-	return db::iterator<true>{pmemkv_read_iterator_new(db_.get())};
+	pmemkv_iterator *tmp;
+	auto ret = static_cast<status>(pmemkv_read_iterator_new(db_.get(), &tmp));
+	if (ret == status::OK)
+		return {db::iterator<true>{tmp}};
+	else
+		return {ret};
 }
 
 /**

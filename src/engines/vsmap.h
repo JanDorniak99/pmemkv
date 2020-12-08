@@ -94,6 +94,7 @@ public:
 	status seek_to_first() final;
 	status seek_to_last() final;
 
+	status is_next() final;
 	status next() final;
 	status prev() final;
 
@@ -109,8 +110,7 @@ protected:
 };
 
 template <>
-class vsmap::vsmap_iterator<false> : public vsmap::vsmap_iterator<true>,
-				     public internal::write_iterator_base {
+class vsmap::vsmap_iterator<false> : public vsmap::vsmap_iterator<true> {
 	using container_type = vsmap::map_type;
 
 public:
@@ -120,6 +120,10 @@ public:
 	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos,
 								size_t n) final;
 	status commit() final;
+	void abort() final;
+
+private:
+	std::vector<std::pair<std::string, size_t>> log;
 };
 
 } /* namespace kv */

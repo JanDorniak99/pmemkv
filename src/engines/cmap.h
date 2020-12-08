@@ -118,8 +118,7 @@ protected:
 };
 
 template <>
-class cmap::cmap_iterator<false> : public cmap::cmap_iterator<true>,
-				   public internal::write_iterator_base {
+class cmap::cmap_iterator<false> : public cmap::cmap_iterator<true> {
 	using container_type = internal::cmap::map_t;
 
 public:
@@ -127,7 +126,12 @@ public:
 
 	std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos,
 								size_t n) final;
+
 	status commit() final;
+	void abort() final;
+
+private:
+	std::vector<std::pair<std::string, size_t>> log;
 };
 
 } /* namespace kv */

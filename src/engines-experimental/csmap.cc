@@ -327,8 +327,7 @@ csmap::csmap_iterator<false>::csmap_iterator(container_type *c, global_mutex_typ
 
 status csmap::csmap_iterator<true>::seek(string_view key)
 {
-	if (_it != container->end())
-		node_lock.unlock();
+	init_seek();
 
 	_it = container->find(key);
 	if (_it == container->end()) {
@@ -342,8 +341,7 @@ status csmap::csmap_iterator<true>::seek(string_view key)
 
 status csmap::csmap_iterator<true>::seek_lower(string_view key)
 {
-	if (_it != container->end())
-		node_lock.unlock();
+	init_seek();
 
 	_it = container->find_lower(key);
 	if (_it == container->end())
@@ -356,8 +354,7 @@ status csmap::csmap_iterator<true>::seek_lower(string_view key)
 
 status csmap::csmap_iterator<true>::seek_lower_eq(string_view key)
 {
-	if (_it != container->end())
-		node_lock.unlock();
+	init_seek();
 
 	_it = container->find_lower_eq(key);
 	if (_it == container->end())
@@ -370,8 +367,7 @@ status csmap::csmap_iterator<true>::seek_lower_eq(string_view key)
 
 status csmap::csmap_iterator<true>::seek_higher(string_view key)
 {
-	if (_it != container->end())
-		node_lock.unlock();
+	init_seek();
 
 	_it = container->find_higher(key);
 	if (_it == container->end())
@@ -384,8 +380,7 @@ status csmap::csmap_iterator<true>::seek_higher(string_view key)
 
 status csmap::csmap_iterator<true>::seek_higher_eq(string_view key)
 {
-	if (_it != container->end())
-		node_lock.unlock();
+	init_seek();
 
 	_it = container->find_higher_eq(key);
 	if (_it == container->end())
@@ -398,8 +393,7 @@ status csmap::csmap_iterator<true>::seek_higher_eq(string_view key)
 
 status csmap::csmap_iterator<true>::seek_to_first()
 {
-	if (_it != container->end())
-		node_lock.unlock();
+	init_seek();
 
 	if (container->empty())
 		return status::NOT_FOUND;
@@ -411,27 +405,18 @@ status csmap::csmap_iterator<true>::seek_to_first()
 	return status::OK;
 }
 
-// XXX: change to not implemented?
-status csmap::csmap_iterator<true>::seek_to_last()
+status csmap::csmap_iterator<true>::is_next()
 {
-	if (_it != container->end())
-		node_lock.unlock();
-
-	if (container->empty())
+	auto tmp = _it;
+	if (tmp == container->end() || ++tmp == container->end())
 		return status::NOT_FOUND;
-
-	_it = container->begin();
-	std::advance(_it, container->size() - 1);
-
-	node_lock = csmap::unique_node_lock_type(_it->second.mtx);
 
 	return status::OK;
 }
 
 status csmap::csmap_iterator<true>::next()
 {
-	if (_it != container->end())
-		node_lock.unlock();
+	init_seek();
 
 	if (_it == container->end() || ++_it == container->end())
 		return status::NOT_FOUND;
@@ -443,8 +428,7 @@ status csmap::csmap_iterator<true>::next()
 
 std::pair<string_view, status> csmap::csmap_iterator<true>::key()
 {
-	if (_it == container->end())
-		return {{}, status::NOT_FOUND};
+	assert(_it != container->end());
 
 	return {_it->first.cdata(), status::OK};
 }
@@ -452,8 +436,7 @@ std::pair<string_view, status> csmap::csmap_iterator<true>::key()
 std::pair<pmem::obj::slice<const char *>, status>
 csmap::csmap_iterator<true>::read_range(size_t pos, size_t n)
 {
-	if (_it == container->end())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
+	assert(_it != container->end());
 
 	if (pos + n > _it->second.val.size() || pos + n < pos)
 		n = _it->second.val.size() - pos;
@@ -464,31 +447,19 @@ csmap::csmap_iterator<true>::read_range(size_t pos, size_t n)
 std::pair<pmem::obj::slice<char *>, status>
 csmap::csmap_iterator<false>::write_range(size_t pos, size_t n)
 {
-	if (_it == container->end())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
-
-	/* check if position of iterator changed */
-	auto key = _it->first.cdata();
-	if (snapshotted_key.compare(key) != 0) {
-		abort();
-		snapshotted_key = key;
-	}
+	assert(_it != container->end());
 
 	if (pos + n > _it->second.val.size() || pos + n < pos)
 		n = _it->second.val.size() - pos;
 
 	log.push_back({{_it->second.val.cdata(), n}, pos});
-	auto &val = log[log.size() - 1].first;
+	auto &val = log.back().first;
 
 	return {{&val[0], &val[n]}, status::OK};
 }
 
 status csmap::csmap_iterator<false>::commit()
 {
-	/* check if position of iterator changed before commit */
-	if (snapshotted_key.compare(_it->first.cdata()) != 0)
-		abort();
-
 	pmem::obj::transaction::run(pop, [&] {
 		for (auto &p : log) {
 			auto dest = _it->second.val.range(p.second, p.first.size());
@@ -498,6 +469,24 @@ status csmap::csmap_iterator<false>::commit()
 	log.clear();
 
 	return status::OK;
+}
+
+void csmap::csmap_iterator<false>::abort()
+{
+	log.clear();
+}
+
+void csmap::csmap_iterator<true>::init_seek()
+{
+	if (_it != container->end())
+		node_lock.unlock();
+}
+
+void csmap::csmap_iterator<false>::init_seek()
+{
+	csmap::csmap_iterator<true>::init_seek();
+
+	log.clear();
 }
 
 } // namespace kv

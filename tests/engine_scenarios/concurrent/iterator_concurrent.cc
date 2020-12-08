@@ -15,7 +15,7 @@ static void init_keys(pmem::kv::db &kv, size_t size)
 
 static void verify_kv(pmem::kv::db &kv, size_t size)
 {
-	auto it = kv.new_read_iterator();
+	auto &it = new_iterator<true>(kv);
 	for (size_t i = 0; i < size; i++) {
 		ASSERT_STATUS(it.seek(std::to_string(i)), pmem::kv::status::OK);
 		verify_value<true>(it, std::string(20 + i, 'x'));
@@ -30,16 +30,15 @@ static void concurrent_write(size_t threads_number, pmem::kv::db &kv)
 	parallel_exec(threads_number + 1, [&](size_t thread_id) {
 		/* check consistency */
 		if (thread_id == threads_number) {
-			auto it = kv.new_read_iterator();
+			auto &it = new_iterator<true>(kv);
 			for (size_t i = 0; i < n; i++) {
 				ASSERT_STATUS(it.seek(std::to_string(i)),
 					      pmem::kv::status::OK);
 
-				auto res = it.read_range(
-					0, std::numeric_limits<size_t>::max());
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				auto value =
-					std::string(res.first.begin(), res.first.size());
+				auto res = it.read_range();
+				UT_ASSERT(res.is_ok());
+				auto value = std::string(res.get_value().data(),
+							 res.get_value().size());
 
 				std::string possible_values[4] = {
 					std::string(20 + i, 'x'),
@@ -58,29 +57,29 @@ static void concurrent_write(size_t threads_number, pmem::kv::db &kv)
 			return;
 		}
 
-		auto it = kv.new_write_iterator();
+		auto &it = new_iterator<false>(kv);
 		for (size_t i = thread_id / 2; i < n; i += threads_number / 2) {
 			ASSERT_STATUS(it.seek(std::to_string(i)), pmem::kv::status::OK);
 			/* write 'a' to chars from 10 to end */
 			if (thread_id % 2) {
 				auto res = it.write_range(
 					10, std::numeric_limits<size_t>::max());
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				for (auto &c : res.first)
+				UT_ASSERT(res.is_ok());
+				for (auto &c : res.get_value())
 					c = 'a';
 			}
 			/* write 'b' to chars from begin to 10 */
 			else {
 				auto res = it.write_range(0, 10);
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				for (auto &c : res.first)
+				UT_ASSERT(res.is_ok());
+				for (auto &c : res.get_value())
 					c = 'b';
 			}
 			ASSERT_STATUS(it.commit(), pmem::kv::status::OK);
 		}
 	});
 
-	auto it = kv.new_read_iterator();
+	auto &it = new_iterator<true>(kv);
 	for (size_t i = 0; i < n; i++) {
 		ASSERT_STATUS(it.seek(std::to_string(i)), pmem::kv::status::OK);
 		verify_value<true>(it, std::string(10, 'b') + std::string(10 + i, 'a'));
@@ -98,19 +97,19 @@ static void concurrent_write_abort(size_t threads_number, pmem::kv::db &kv)
 			return;
 		}
 
-		auto it = kv.new_write_iterator();
+		auto &it = new_iterator<false>(kv);
 		for (size_t i = thread_id / 2; i < n; i += threads_number) {
 			it.seek(std::to_string(i));
 			if (thread_id % 2) {
 				auto res = it.write_range(
 					10, std::numeric_limits<size_t>::max());
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				for (auto &c : res.first)
+				UT_ASSERT(res.is_ok());
+				for (auto &c : res.get_value())
 					c = 'a';
 			} else {
 				auto res = it.write_range(0, 10);
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				for (auto &c : res.first)
+				UT_ASSERT(res.is_ok());
+				for (auto &c : res.get_value())
 					c = 'b';
 			}
 			it.abort();
@@ -129,20 +128,19 @@ static void concurrent_write_sorted(size_t threads_number, pmem::kv::db &kv)
 	parallel_exec(threads_number + 1, [&](size_t thread_id) {
 		/* check consistency */
 		if (thread_id == threads_number) {
-			auto it = kv.new_read_iterator();
+			auto &it = new_iterator<true>(kv);
 			ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::OK);
 
 			do {
 				auto key = it.key();
-				ASSERT_STATUS(key.second, pmem::kv::status::OK);
-				auto key_as_number =
-					static_cast<size_t>(std::stoi(key.first.data()));
+				UT_ASSERT(key.is_ok());
+				auto key_as_number = static_cast<size_t>(
+					std::stoi(key.get_value().data()));
 
-				auto res = it.read_range(
-					0, std::numeric_limits<size_t>::max());
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				auto value =
-					std::string(res.first.begin(), res.first.size());
+				auto res = it.read_range();
+				UT_ASSERT(res.is_ok());
+				auto value = std::string(res.get_value().data(),
+							 res.get_value().size());
 
 				std::string possible_values[4] = {
 					std::string(20 + key_as_number, 'x'),
@@ -164,7 +162,7 @@ static void concurrent_write_sorted(size_t threads_number, pmem::kv::db &kv)
 			return;
 		}
 
-		auto it = kv.new_write_iterator();
+		auto &it = new_iterator<false>(kv);
 		ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::OK);
 
 		do {
@@ -172,22 +170,22 @@ static void concurrent_write_sorted(size_t threads_number, pmem::kv::db &kv)
 			if (thread_id % 2) {
 				auto res = it.write_range(
 					10, std::numeric_limits<size_t>::max());
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				for (auto &c : res.first)
+				UT_ASSERT(res.is_ok());
+				for (auto &c : res.get_value())
 					c = 'a';
 			}
 			/* write 'b' to chars from begin to 10 */
 			else {
 				auto res = it.write_range(0, 10);
-				ASSERT_STATUS(res.second, pmem::kv::status::OK);
-				for (auto &c : res.first)
+				UT_ASSERT(res.is_ok());
+				for (auto &c : res.get_value())
 					c = 'b';
 			}
 			ASSERT_STATUS(it.commit(), pmem::kv::status::OK);
 		} while (it.next() == pmem::kv::status::OK);
 	});
 
-	auto it = kv.new_read_iterator();
+	auto &it = new_iterator<true>(kv);
 	for (size_t i = 0; i < n; i++) {
 		ASSERT_STATUS(it.seek(std::to_string(i)), pmem::kv::status::OK);
 		verify_value<true>(it, std::string(10, 'b') + std::string(10 + i, 'a'));

@@ -29,26 +29,33 @@ public:
 	virtual status seek_to_first();
 	virtual status seek_to_last();
 
+	virtual status is_next();
 	virtual status next();
 	virtual status prev();
 
 	virtual std::pair<string_view, status> key() = 0;
 	virtual std::pair<pmem::obj::slice<const char *>, status>
 	read_range(size_t pos, size_t n) = 0;
+
+	virtual std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos,
+									size_t n);
+
+	virtual status commit();
+	virtual void abort();
+
+protected:
+	virtual void init_seek();
 };
 
+/*
 class write_iterator_base : virtual public iterator_base {
 public:
-	virtual std::pair<pmem::obj::slice<char *>, status> write_range(size_t pos,
-									size_t n) = 0;
-
-	virtual status commit() = 0;
-	void abort();
 
 protected:
 	std::vector<std::pair<std::string, size_t>> log;
-	string_view snapshotted_key = {};
-};
+
+	virtual void init_seek();
+};*/
 
 } /* namespace internal */
 } /* namespace kv */

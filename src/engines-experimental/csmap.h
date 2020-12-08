@@ -148,8 +148,8 @@ public:
 	status seek_higher_eq(string_view key) final;
 
 	status seek_to_first() final;
-	status seek_to_last() final;
 
+	status is_next() final;
 	status next() final;
 
 	std::pair<string_view, status> key() final;
@@ -163,11 +163,12 @@ protected:
 	csmap::shared_global_lock_type lock;
 	csmap::unique_node_lock_type node_lock;
 	pmem::obj::pool_base pop;
+
+	void init_seek();
 };
 
 template <>
-class csmap::csmap_iterator<false> : public csmap::csmap_iterator<true>,
-				     public internal::write_iterator_base {
+class csmap::csmap_iterator<false> : public csmap::csmap_iterator<true> {
 	using container_type = csmap::container_type;
 
 public:
@@ -177,6 +178,12 @@ public:
 								size_t n) final;
 
 	status commit() final;
+	void abort() final;
+
+private:
+	std::vector<std::pair<std::string, size_t>> log;
+
+	void init_seek() final;
 };
 
 } /* namespace kv */

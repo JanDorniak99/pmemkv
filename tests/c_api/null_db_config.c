@@ -133,6 +133,9 @@ void null_iterator_all_funcs_test()
 	s = pmemkv_iterator_seek_to_last(NULL);
 	UT_ASSERTeq(s, PMEMKV_STATUS_INVALID_ARGUMENT);
 
+	s = pmemkv_iterator_is_next(NULL);
+	UT_ASSERTeq(s, PMEMKV_STATUS_INVALID_ARGUMENT);
+
 	s = pmemkv_iterator_next(NULL);
 	UT_ASSERTeq(s, PMEMKV_STATUS_INVALID_ARGUMENT);
 

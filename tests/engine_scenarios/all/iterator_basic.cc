@@ -12,11 +12,12 @@
 template <bool IsConst>
 static void seek_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
+	// res_it = kv.new_read_iterator();
+	//auto &it = res_it.get_value();
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek(p.first), pmem::kv::status::NOT_FOUND);
-		verify_not_found<IsConst>(it);
 	});
 
 	insert_keys(kv);
@@ -31,10 +32,9 @@ static void seek_test(pmem::kv::db &kv)
 template <bool IsConst>
 static void seek_to_first_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.seek_to_first(), pmem::kv::status::NOT_FOUND);
-	verify_not_found<IsConst>(it);
 
 	insert_keys(kv);
 
@@ -52,10 +52,9 @@ static void seek_to_first_test(pmem::kv::db &kv)
 template <bool IsConst>
 static void seek_to_last_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.seek_to_last(), pmem::kv::status::NOT_FOUND);
-	verify_not_found<IsConst>(it);
 
 	insert_keys(kv);
 
@@ -73,7 +72,7 @@ static void seek_to_last_test(pmem::kv::db &kv)
 /* only for non const (write) iterators */
 static void write_test(pmem::kv::db &kv)
 {
-	auto it = kv.new_write_iterator();
+	auto &it = new_iterator<false>(kv);
 
 	insert_keys(kv);
 
@@ -82,20 +81,18 @@ static void write_test(pmem::kv::db &kv)
 		verify_key<false>(it, p.first);
 		verify_value<false>(it, p.second);
 
-		auto res = it.write_range(0, std::numeric_limits<size_t>::max());
-		ASSERT_STATUS(res.second, pmem::kv::status::OK);
-		for (auto &c : res.first)
+		auto res = it.write_range();
+		UT_ASSERT(res.is_ok());
+		for (auto &c : res.get_value())
 			c = 'x';
 
-		/* verify that value not changed before commit */
-		auto current = it.read_range(0, std::numeric_limits<size_t>::max());
-		ASSERT_STATUS(current.second, pmem::kv::status::OK);
+		/* verify that value has not changed before commit */
 		verify_value<false>(it, p.second);
 
 		it.commit();
 
-		/* check if value changed */
-		verify_value<false>(it, std::string(res.first.size(), 'x'));
+		/* check if value has changed */
+		verify_value<false>(it, std::string(res.get_value().size(), 'x'));
 	});
 
 	/* write only two last characters */
@@ -103,8 +100,8 @@ static void write_test(pmem::kv::db &kv)
 	it.seek(last.first);
 	auto res = it.write_range(last.second.size() - 2,
 				  std::numeric_limits<size_t>::max());
-	ASSERT_STATUS(res.second, pmem::kv::status::OK);
-	for (auto &c : res.first)
+	UT_ASSERT(res.is_ok());
+	for (auto &c : res.get_value())
 		c = 'a';
 	it.commit();
 
@@ -114,7 +111,7 @@ static void write_test(pmem::kv::db &kv)
 
 static void write_abort_test(pmem::kv::db &kv)
 {
-	auto it = kv.new_write_iterator();
+	auto &it = new_iterator<false>(kv);
 
 	insert_keys(kv);
 
@@ -123,30 +120,28 @@ static void write_abort_test(pmem::kv::db &kv)
 		verify_key<false>(it, p.first);
 		verify_value<false>(it, p.second);
 
-		auto res = it.write_range(0, std::numeric_limits<size_t>::max());
-		ASSERT_STATUS(res.second, pmem::kv::status::OK);
-		for (auto &c : res.first)
+		auto res = it.write_range();
+		UT_ASSERT(res.is_ok());
+		for (auto &c : res.get_value())
 			c = 'x';
 
-		/* verify that value not changed before abort */
-		auto current = it.read_range(0, std::numeric_limits<size_t>::max());
-		ASSERT_STATUS(current.second, pmem::kv::status::OK);
+		/* verify that value has not changed before abort */
 		verify_value<false>(it, p.second);
 
 		it.abort();
 
-		/* check if value not changed after abort */
+		/* check if value has not changed after abort */
 		verify_value<false>(it, p.second);
 	});
 
 	/* check if seek will internally abort transaction */
-	ASSERT_STATUS(it.seek(keys[0].first), pmem::kv::status::OK);
-	auto res = it.write_range(0, std::numeric_limits<size_t>::max());
-	ASSERT_STATUS(res.second, pmem::kv::status::OK);
-	for (auto &c : res.first)
+	ASSERT_STATUS(it.seek(keys.front().first), pmem::kv::status::OK);
+	auto res = it.write_range();
+	UT_ASSERT(res.is_ok());
+	for (auto &c : res.get_value())
 		c = 'a';
 
-	it.seek(keys[keys.size() - 1].first);
+	it.seek(keys.back().first);
 	it.commit();
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
@@ -159,8 +154,9 @@ static void write_abort_test(pmem::kv::db &kv)
 static void test(int argc, char *argv[])
 {
 	if (argc < 3)
-		UT_FATAL("usage: %s engine json_config [test_only_seek_and_write]",
-			 argv[0]);
+		UT_FATAL(
+			"usage: %s engine json_config [test_seek_to_first] [test_seek_to_last]",
+			argv[0]);
 
 	run_engine_tests(argv[1], argv[2],
 			 {
@@ -170,11 +166,18 @@ static void test(int argc, char *argv[])
 				 write_abort_test,
 			 });
 
-	if (argc < 4 || std::string(argv[3]).compare("true") != 0) {
+	if (argc < 4 || std::string(argv[3]).compare("true") == 0) {
 		run_engine_tests(argv[1], argv[2],
 				 {
 					 seek_to_first_test<true>,
 					 seek_to_first_test<false>,
+
+				 });
+	}
+
+	if (argc < 5 || std::string(argv[4]).compare("true") == 0) {
+		run_engine_tests(argv[1], argv[2],
+				 {
 					 seek_to_last_test<true>,
 					 seek_to_last_test<false>,
 				 });

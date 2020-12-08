@@ -5,6 +5,7 @@
 #include "../out.h"
 #include <libpmemobj++/transaction.hpp>
 
+#include <cassert>
 #include <iostream>
 
 namespace pmem
@@ -147,8 +148,7 @@ vcmap::vcmap_iterator<false>::vcmap_iterator(container_type *c, ch_allocator_t *
 
 status vcmap::vcmap_iterator<true>::seek(string_view key)
 {
-	if (_acc.empty())
-		_acc.release();
+	init_seek();
 
 	if (container->find(_acc, pmem_string(key.data(), key.size(), *ch_allocator)))
 		return status::OK;
@@ -158,8 +158,7 @@ status vcmap::vcmap_iterator<true>::seek(string_view key)
 
 std::pair<string_view, status> vcmap::vcmap_iterator<true>::key()
 {
-	if (_acc.empty())
-		return {{}, status::NOT_FOUND};
+	assert(!_acc.empty());
 
 	return {{_acc->first.c_str()}, status::OK};
 }
@@ -167,8 +166,7 @@ std::pair<string_view, status> vcmap::vcmap_iterator<true>::key()
 std::pair<pmem::obj::slice<const char *>, status>
 vcmap::vcmap_iterator<true>::read_range(size_t pos, size_t n)
 {
-	if (_acc.empty())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
+	assert(!_acc.empty());
 
 	if (pos + n > _acc->second.size() || pos + n < pos)
 		n = _acc->second.size() - pos;
@@ -179,37 +177,31 @@ vcmap::vcmap_iterator<true>::read_range(size_t pos, size_t n)
 std::pair<pmem::obj::slice<char *>, status>
 vcmap::vcmap_iterator<false>::write_range(size_t pos, size_t n)
 {
-	if (_acc.empty())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
-
-	/* check if position of iterator changed */
-	auto key = _acc->first.c_str();
-	if (snapshotted_key.compare(key) != 0) {
-		abort();
-		snapshotted_key = key;
-	}
+	assert(!_acc.empty());
 
 	if (pos + n > _acc->second.size() || pos + n < pos)
 		n = _acc->second.size() - pos;
 
 	log.push_back({std::string(_acc->second.c_str() + pos, n), pos});
-	auto &val = log[log.size() - 1].first;
+	auto &val = log.back().first;
 
 	return {{&val[0], &val[n]}, status::OK};
 }
 
 status vcmap::vcmap_iterator<false>::commit()
 {
-	/* check if position of iterator changed before commit */
-	if (snapshotted_key.compare(_acc->first.c_str()) != 0)
-		abort();
-
 	for (auto &p : log) {
 		auto dest = &(_acc->second[0]) + p.second;
 		std::copy(p.first.begin(), p.first.end(), dest);
 	}
 	log.clear();
+
 	return status::OK;
+}
+
+void vcmap::vcmap_iterator<false>::abort()
+{
+	log.clear();
 }
 
 } // namespace kv

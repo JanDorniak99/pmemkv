@@ -384,7 +384,7 @@ if(ENGINE_CMAP)
 			BINARY iterator_basic
 			TRACERS none memcheck pmemcheck
 			SCRIPT pmemobj_based/default.cmake
-			PARAMS true)
+			PARAMS false false)
 
 	add_engine_test(ENGINE cmap
 			BINARY iterator_concurrent
@@ -701,7 +701,8 @@ if(ENGINE_CSMAP)
 	add_engine_test(ENGINE csmap
 			BINARY iterator_basic
 			TRACERS none memcheck pmemcheck
-			SCRIPT pmemobj_based/default.cmake)
+			SCRIPT pmemobj_based/default.cmake
+			PARAMS true false)
 
 	add_engine_test(ENGINE csmap
 			BINARY iterator_sorted
@@ -802,7 +803,7 @@ if(ENGINE_VCMAP)
 			BINARY iterator_basic
 			TRACERS none memcheck
 			SCRIPT memkind_based/default.cmake
-			PARAMS true)
+			PARAMS false false)
 
 	add_engine_test(ENGINE vcmap
 			BINARY iterator_concurrent

@@ -315,6 +315,8 @@ stree::stree_iterator<false>::stree_iterator(container_type *c)
 
 status stree::stree_iterator<true>::seek(string_view key)
 {
+	init_seek();
+
 	_it = container->find(key);
 	if (_it != container->end())
 		return status::OK;
@@ -324,6 +326,8 @@ status stree::stree_iterator<true>::seek(string_view key)
 
 status stree::stree_iterator<true>::seek_lower(string_view key)
 {
+	init_seek();
+
 	_it = container->lower_bound(key);
 	if (_it == container->begin()) {
 		_it = container->end();
@@ -337,6 +341,8 @@ status stree::stree_iterator<true>::seek_lower(string_view key)
 
 status stree::stree_iterator<true>::seek_lower_eq(string_view key)
 {
+	init_seek();
+
 	_it = container->upper_bound(key);
 	if (_it == container->begin()) {
 		_it = container->end();
@@ -350,6 +356,8 @@ status stree::stree_iterator<true>::seek_lower_eq(string_view key)
 
 status stree::stree_iterator<true>::seek_higher(string_view key)
 {
+	init_seek();
+
 	_it = container->upper_bound(key);
 	if (_it == container->end())
 		return status::NOT_FOUND;
@@ -359,6 +367,8 @@ status stree::stree_iterator<true>::seek_higher(string_view key)
 
 status stree::stree_iterator<true>::seek_higher_eq(string_view key)
 {
+	init_seek();
+
 	_it = container->lower_bound(key);
 	if (_it == container->end())
 		return status::NOT_FOUND;
@@ -368,6 +378,8 @@ status stree::stree_iterator<true>::seek_higher_eq(string_view key)
 
 status stree::stree_iterator<true>::seek_to_first()
 {
+	init_seek();
+
 	if (container->size() == 0)
 		return status::NOT_FOUND;
 
@@ -378,6 +390,8 @@ status stree::stree_iterator<true>::seek_to_first()
 
 status stree::stree_iterator<true>::seek_to_last()
 {
+	init_seek();
+
 	if (container->size() == 0)
 		return status::NOT_FOUND;
 
@@ -387,8 +401,19 @@ status stree::stree_iterator<true>::seek_to_last()
 	return status::OK;
 }
 
+status stree::stree_iterator<true>::is_next()
+{
+	auto tmp = _it;
+	if (tmp == container->end() || ++tmp == container->end())
+		return status::NOT_FOUND;
+
+	return status::OK;
+}
+
 status stree::stree_iterator<true>::next()
 {
+	init_seek();
+
 	if (_it == container->end() || ++_it == container->end())
 		return status::NOT_FOUND;
 
@@ -397,6 +422,8 @@ status stree::stree_iterator<true>::next()
 
 status stree::stree_iterator<true>::prev()
 {
+	init_seek();
+
 	if (_it == container->begin())
 		return status::NOT_FOUND;
 
@@ -407,8 +434,7 @@ status stree::stree_iterator<true>::prev()
 
 std::pair<string_view, status> stree::stree_iterator<true>::key()
 {
-	if (_it == container->end())
-		return {{}, status::NOT_FOUND};
+	assert(_it != container->end());
 
 	return {_it->first.cdata(), status::OK};
 }
@@ -416,8 +442,7 @@ std::pair<string_view, status> stree::stree_iterator<true>::key()
 std::pair<pmem::obj::slice<const char *>, status>
 stree::stree_iterator<true>::read_range(size_t pos, size_t n)
 {
-	if (_it == container->end())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
+	assert(_it != container->end());
 
 	if (pos + n > _it->second.size() || pos + n < pos)
 		n = _it->second.size() - pos;
@@ -428,31 +453,19 @@ stree::stree_iterator<true>::read_range(size_t pos, size_t n)
 std::pair<pmem::obj::slice<char *>, status>
 stree::stree_iterator<false>::write_range(size_t pos, size_t n)
 {
-	if (_it == container->end())
-		return {{nullptr, nullptr}, status::NOT_FOUND};
-
-	/* check if position of iterator changed */
-	auto key = _it->first.cdata();
-	if (snapshotted_key.compare(key) != 0) {
-		abort();
-		snapshotted_key = key;
-	}
+	assert(_it != container->end());
 
 	if (pos + n > _it->second.size() || pos + n < pos)
 		n = _it->second.size() - pos;
 
 	log.push_back({{_it->second.cdata(), n}, pos});
-	auto &val = log[log.size() - 1].first;
+	auto &val = log.back().first;
 
 	return {{&val[0], &val[0] + n}, status::OK};
 }
 
 status stree::stree_iterator<false>::commit()
 {
-	/* check if position of iterator changed before commit */
-	if (snapshotted_key.compare(_it->first.cdata()) != 0)
-		abort();
-
 	pmem::obj::transaction::run(pop, [&] {
 		for (auto &p : log) {
 			auto dest = _it->second.range(p.second, p.first.size());
@@ -460,7 +473,13 @@ status stree::stree_iterator<false>::commit()
 		}
 	});
 	log.clear();
+
 	return status::OK;
+}
+
+void stree::stree_iterator<false>::abort()
+{
+	log.clear();
 }
 
 } // namespace kv

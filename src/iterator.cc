@@ -40,6 +40,11 @@ status iterator_base::seek_to_last()
 	return status::NOT_SUPPORTED;
 }
 
+status iterator_base::is_next()
+{
+	return status::NOT_SUPPORTED;
+}
+
 status iterator_base::next()
 {
 	return status::NOT_SUPPORTED;
@@ -50,9 +55,25 @@ status iterator_base::prev()
 	return status::NOT_SUPPORTED;
 }
 
-void write_iterator_base::abort()
+std::pair<pmem::obj::slice<char *>, status> iterator_base::write_range(size_t pos,
+								       size_t n)
 {
-	log.clear();
+	return {{nullptr, nullptr}, status::NOT_SUPPORTED};
+}
+
+status iterator_base::commit()
+{
+	return status::NOT_SUPPORTED;
+}
+
+void iterator_base::abort()
+{
+	/* defaulty NOT_SUPPORTED */
+}
+
+void iterator_base::init_seek()
+{
+	abort();
 }
 
 } /* namespace internal */

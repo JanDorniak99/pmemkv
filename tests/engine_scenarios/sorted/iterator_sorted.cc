@@ -10,11 +10,10 @@
 template <bool IsConst>
 static void seek_lower_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_lower(p.first), pmem::kv::status::NOT_FOUND);
-		verify_not_found<IsConst>(it);
 	});
 
 	insert_keys(kv);
@@ -32,11 +31,10 @@ static void seek_lower_test(pmem::kv::db &kv)
 template <bool IsConst>
 static void seek_lower_eq_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_lower_eq(p.first), pmem::kv::status::NOT_FOUND);
-		verify_not_found<IsConst>(it);
 	});
 
 	insert_keys(kv);
@@ -51,11 +49,10 @@ static void seek_lower_eq_test(pmem::kv::db &kv)
 template <bool IsConst>
 static void seek_higher_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_higher(p.first), pmem::kv::status::NOT_FOUND);
-		verify_not_found<IsConst>(it);
 	});
 
 	insert_keys(kv);
@@ -74,11 +71,10 @@ static void seek_higher_test(pmem::kv::db &kv)
 template <bool IsConst>
 static void seek_higher_eq_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	std::for_each(keys.begin(), keys.end(), [&](pair p) {
 		ASSERT_STATUS(it.seek_higher_eq(p.first), pmem::kv::status::NOT_FOUND);
-		verify_not_found<IsConst>(it);
 	});
 
 	insert_keys(kv);
@@ -93,10 +89,9 @@ static void seek_higher_eq_test(pmem::kv::db &kv)
 template <bool IsConst>
 static void next_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.next(), pmem::kv::status::NOT_FOUND);
-	verify_not_found<IsConst>(it);
 
 	insert_keys(kv);
 
@@ -105,21 +100,22 @@ static void next_test(pmem::kv::db &kv)
 	std::for_each(keys.begin(), keys.end() - 1, [&](pair p) {
 		verify_key<IsConst>(it, p.first);
 		verify_value<IsConst>(it, p.second);
+		ASSERT_STATUS(it.is_next(), pmem::kv::status::OK);
 		ASSERT_STATUS(it.next(), pmem::kv::status::OK);
 	});
 
 	verify_key<IsConst>(it, (--keys.end())->first);
 	verify_value<IsConst>(it, (--keys.end())->second);
+	ASSERT_STATUS(it.is_next(), pmem::kv::status::NOT_FOUND);
 	ASSERT_STATUS(it.next(), pmem::kv::status::NOT_FOUND);
 }
 
 template <bool IsConst>
 static void prev_test(pmem::kv::db &kv)
 {
-	auto it = new_iterator<IsConst>(kv);
+	auto &it = new_iterator<IsConst>(kv);
 
 	ASSERT_STATUS(it.prev(), pmem::kv::status::NOT_FOUND);
-	verify_not_found<IsConst>(it);
 
 	insert_keys(kv);
 
