@@ -11,24 +11,17 @@ using namespace pmem::kv;
 
 static void SimpleTest(pmem::kv::db &kv)
 {
-	std::size_t cnt = std::numeric_limits<std::size_t>::max();
-	ASSERT_STATUS(kv.count_all(cnt), status::OK);
-	UT_ASSERT(cnt == 0);
-	ASSERT_STATUS(kv.exists("key1"), status::NOT_FOUND);
-	std::string value;
-	ASSERT_STATUS(kv.get("key1", &value), status::NOT_FOUND);
-	ASSERT_STATUS(kv.put("key1", "value1"), status::OK);
-	cnt = std::numeric_limits<std::size_t>::max();
-	ASSERT_STATUS(kv.count_all(cnt), status::OK);
-	UT_ASSERT(cnt == 1);
-	ASSERT_STATUS(kv.exists("key1"), status::OK);
-	ASSERT_STATUS(kv.get("key1", &value), status::OK);
-	UT_ASSERT(value == "value1");
-	value = "";
-	UT_ASSERT(kv.get("key1", [&](string_view v) {
-		value.append(v.data(), v.size());
-	}) == status::OK);
-	UT_ASSERT(value == "value1");
+	std::string value = "";
+	ASSERT_STATUS(kv.put(value, value), status::OK);
+
+	std::string v1 = "";
+	ASSERT_STATUS(kv.get(value, &v1), status::OK);
+
+	std::cerr << std::hex << *(uint64_t *)(v1.data()) << std::endl;
+	std::cerr << std::hex << *(uint64_t *)(value.data()) << std::endl;
+
+	UT_ASSERT(*(uint64_t *)(v1.data()) == *(uint64_t *)(value.data()));
+	UT_ASSERT(0);
 }
 
 static void EmptyKeyTest(pmem::kv::db &kv)
