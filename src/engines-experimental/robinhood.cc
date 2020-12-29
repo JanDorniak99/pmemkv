@@ -130,7 +130,8 @@ static void hashmap_create(PMEMobjpool *pop, TOID(struct hashmap_rp) * hashmap_p
 static void entry_update(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 			 struct add_entry *args, int rebuild)
 {
-	HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 4);
+	//std::cerr << args->actv_cnt + 4 << std::endl;
+	//HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 4);
 
 	struct entry *entry_p = D_RW(hashmap->entries);
 	entry_p += args->pos;
@@ -158,7 +159,8 @@ static void entry_update(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 static void entry_add(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 		      struct add_entry *args, int rebuild)
 {
-	HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 1);
+	//std::cerr << args->actv_cnt + 1 << std::endl;
+	//HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 1);
 
 	if (rebuild == HASHMAP_RP_REBUILD)
 		hashmap->count++;
@@ -181,7 +183,7 @@ static void entry_add(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 static int insert_helper(PMEMobjpool *pop, struct hashmap_rp *hashmap, uint64_t key,
 			 uint64_t value, int rebuild)
 {
-	HM_ASSERT(hashmap->count + 1 < hashmap->resize_threshold);
+	//HM_ASSERT(hashmap->count + 1 < hashmap->resize_threshold);
 
 	struct pobj_action actv[HASHMAP_RP_MAX_ACTIONS];
 
@@ -507,7 +509,9 @@ int hm_rp_lookup(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key
  * hm_rp_foreach -- calls cb for all values from the hashmap
  */
 int hm_rp_foreach(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap,
-		  int (*cb)(uint64_t key, uint64_t value, void *arg), void *arg)
+		  int (*cb)(const char *key, size_t key_size, const char *value,
+			    size_t value_size, void *arg),
+		  void *arg)
 {
 	struct entry *entry_p =
 		(struct entry *)pmemobj_direct(D_RO(hashmap)->entries.oid);
@@ -517,7 +521,10 @@ int hm_rp_foreach(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap,
 		uint64_t hash = entry_p->hash;
 		if (entry_is_empty(hash))
 			continue;
-		ret = cb(entry_p->key, entry_p->value, arg);
+
+		ret = cb(reinterpret_cast<const char *>(&(entry_p->key)), 8,
+			 reinterpret_cast<const char *>(&(entry_p->value)), 8, arg);
+
 		if (ret)
 			return ret;
 	}
@@ -533,9 +540,9 @@ size_t hm_rp_count(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap)
 	return D_RO(hashmap)->count;
 }
 
-}
+} /* namespace robinhood */
 
-}
+} /* namespace internal */
 
 robinhood::robinhood(std::unique_ptr<internal::config> cfg)
     : pmemobj_engine_base(cfg, "pmemkv_robinhood")
@@ -563,10 +570,12 @@ status robinhood::count_all(std::size_t &cnt)
 	return status::OK;
 }
 
-status robinhood::get_all(get_kv_callback *callback, void *arg) // ---------
+status robinhood::get_all(get_kv_callback *callback, void *arg)
 {
 	LOG("get_all");
 	check_outside_tx();
+
+	hm_rp_foreach(pmpool.handle(), container, callback, arg);
 
 	return status::OK;
 }
@@ -596,9 +605,7 @@ status robinhood::get(string_view key, get_v_callback *callback, void *arg)
 		return status::NOT_FOUND;
 	}
 
-	auto str = std::string(reinterpret_cast<const char *>(&result), 8);
-
-	callback(str.c_str(), 8, arg);
+	callback(reinterpret_cast<const char *>(&result), 8, arg);
 
 	return status::OK;
 }
@@ -625,7 +632,7 @@ status robinhood::remove(string_view key)
 
 	auto k = *((uint64_t *)key.data());
 
-	auto result = hm_rp_get(pmpool.handle(), container, k);
+	auto result = hm_rp_remove(pmpool.handle(), container, k);
 
 	if (result == 0)
 		return status::NOT_FOUND;
@@ -641,8 +648,9 @@ void robinhood::Recover()
 				*root_oid);
 	} else {
 		pmem::obj::transaction::run(pmpool, [&] {
+			int seed = 0; // ???
 			internal::robinhood::hm_rp_create(pmpool.handle(), &container,
-							  NULL);
+							  static_cast<void*>(&seed));
 		});
 	}
 }

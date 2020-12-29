@@ -11,7 +11,7 @@ using namespace pmem::kv;
 
 static void SimpleTest(pmem::kv::db &kv)
 {
-	std::string value = "";
+	std::string value = "abcdefgh";
 	ASSERT_STATUS(kv.put(value, value), status::OK);
 
 	std::string v1 = "";
@@ -21,13 +21,13 @@ static void SimpleTest(pmem::kv::db &kv)
 	std::cerr << std::hex << *(uint64_t *)(value.data()) << std::endl;
 
 	UT_ASSERT(*(uint64_t *)(v1.data()) == *(uint64_t *)(value.data()));
-	UT_ASSERT(0);
 }
 
 static void EmptyKeyTest(pmem::kv::db &kv)
 {
 	std::size_t cnt = std::numeric_limits<std::size_t>::max();
 	ASSERT_STATUS(kv.count_all(cnt), status::OK);
+	std::cerr << cnt << std::endl;
 	UT_ASSERT(cnt == 0);
 	ASSERT_STATUS(kv.put("", "empty"), status::OK);
 	cnt = std::numeric_limits<std::size_t>::max();

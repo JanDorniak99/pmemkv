@@ -1529,4 +1529,10 @@ if (ENGINE_ROBINHOOD)
 				TRACERS none memcheck pmemcheck
 				SCRIPT pmemobj_based/default.cmake)
 
+	add_engine_test(ENGINE robinhood
+				BINARY put_get_remove_charset_params
+				TRACERS none memcheck pmemcheck
+				SCRIPT pmemobj_based/default.cmake
+				PARAMS 100 8)
+
 endif()
