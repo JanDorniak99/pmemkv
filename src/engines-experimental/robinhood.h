@@ -23,6 +23,8 @@ namespace internal
 namespace robinhood
 {
 
+#define SHARDS 1024
+
 #ifndef HASHMAP_RP_TYPE_OFFSET
 #define HASHMAP_RP_TYPE_OFFSET 1008
 #endif
@@ -104,10 +106,20 @@ static int *swaps_array = NULL;
 
 using map_type = hashmap_rp;
 
+struct pmem_type {
+	pmem_type() : map()
+	{
+		std::memset(reserved, 0, sizeof(reserved));
+	}
+
+	obj::persistent_ptr<TOID(struct hashmap_rp)[SHARDS]> map;
+	uint64_t reserved[8];
+};
+
 } /* namespace robinhood */
 } /* namespace internal */
 
-class robinhood : public pmemobj_engine_base<internal::robinhood::map_type> {
+class robinhood : public pmemobj_engine_base<internal::robinhood::pmem_type> {
 public:
 	robinhood(std::unique_ptr<internal::config> cfg);
 	~robinhood();
@@ -134,8 +146,15 @@ private:
 
 	void Recover();
 
-	TOID(struct internal::robinhood::hashmap_rp) container;
-	std::unique_ptr<internal::config> config;
+	TOID(struct internal::robinhood::hashmap_rp) * container;
+
+	using mutex_type = std::shared_mutex;
+	using unique_lock_type = std::unique_lock<mutex_type>;
+	using shared_lock_type = std::shared_lock<mutex_type>;
+
+	std::vector<mutex_type> mtxs;
+
+	mutex_type global_mtx;
 };
 
 } /* namespace kv */

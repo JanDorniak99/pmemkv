@@ -130,8 +130,8 @@ static void hashmap_create(PMEMobjpool *pop, TOID(struct hashmap_rp) * hashmap_p
 static void entry_update(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 			 struct add_entry *args, int rebuild)
 {
-	//std::cerr << args->actv_cnt + 4 << std::endl;
-	//HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 4);
+	// std::cerr << args->actv_cnt + 4 << std::endl;
+	// HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 4);
 
 	struct entry *entry_p = D_RW(hashmap->entries);
 	entry_p += args->pos;
@@ -159,8 +159,8 @@ static void entry_update(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 static void entry_add(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 		      struct add_entry *args, int rebuild)
 {
-	//std::cerr << args->actv_cnt + 1 << std::endl;
-	//HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 1);
+	// std::cerr << args->actv_cnt + 1 << std::endl;
+	// HM_ASSERT(HASHMAP_RP_MAX_ACTIONS > args->actv_cnt + 1);
 
 	if (rebuild == HASHMAP_RP_REBUILD)
 		hashmap->count++;
@@ -183,7 +183,7 @@ static void entry_add(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 static int insert_helper(PMEMobjpool *pop, struct hashmap_rp *hashmap, uint64_t key,
 			 uint64_t value, int rebuild)
 {
-	//HM_ASSERT(hashmap->count + 1 < hashmap->resize_threshold);
+	// HM_ASSERT(hashmap->count + 1 < hashmap->resize_threshold);
 
 	struct pobj_action actv[HASHMAP_RP_MAX_ACTIONS];
 
@@ -216,7 +216,7 @@ static int insert_helper(PMEMobjpool *pop, struct hashmap_rp *hashmap, uint64_t 
 			if (rebuild != HASHMAP_RP_REBUILD)
 				pmemobj_publish(pop, args.actv, args.actv_cnt);
 
-			return 1;
+			return 0;
 		}
 
 		/* Case 2: slot is empty from the beginning */
@@ -429,9 +429,10 @@ int hm_rp_init(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap)
  * - -1 if something bad happened
  */
 int hm_rp_insert(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key,
-		 uint64_t value)
+		 uint64_t value, std::shared_mutex &mtx)
 {
 	if (D_RO(hashmap)->count + 1 >= D_RO(hashmap)->resize_threshold) {
+		std::unique_lock<std::shared_mutex> lock(mtx);
 		uint64_t capacity_new = D_RO(hashmap)->capacity * 2;
 		if (hm_rp_rebuild(pop, hashmap, capacity_new) != 0)
 			return -1;
@@ -451,7 +452,7 @@ uint64_t hm_rp_remove(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_
 	const uint64_t pos = index_lookup(D_RO(hashmap), key);
 
 	if (pos == 0)
-		return 0;
+		return std::numeric_limits<uint64_t>::max();
 
 	struct entry *entry_p = D_RW(D_RW(hashmap)->entries);
 	entry_p += pos;
@@ -493,7 +494,7 @@ uint64_t hm_rp_get(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t k
 		(struct entry *)pmemobj_direct(D_RW(hashmap)->entries.oid);
 
 	uint64_t pos = index_lookup(D_RO(hashmap), key);
-	return pos == 0 ? 0 : (entry_p + pos)->value;
+	return pos == 0 ? std::numeric_limits<uint64_t>::max() : (entry_p + pos)->value;
 }
 
 /*
@@ -544,8 +545,13 @@ size_t hm_rp_count(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap)
 
 } /* namespace internal */
 
+static size_t hash(string_view key)
+{
+	return *((size_t *)key.data()) & (SHARDS - 1);
+}
+
 robinhood::robinhood(std::unique_ptr<internal::config> cfg)
-    : pmemobj_engine_base(cfg, "pmemkv_robinhood")
+    : pmemobj_engine_base(cfg, "pmemkv_robinhood"), mtxs(SHARDS)
 {
 	LOG("Started ok");
 	Recover();
@@ -565,7 +571,14 @@ status robinhood::count_all(std::size_t &cnt)
 {
 	LOG("count_all");
 	check_outside_tx();
-	cnt = D_RO(container)->count;
+
+	size_t size = 0;
+	for (size_t i = 0; i < SHARDS; ++i) {
+		shared_lock_type lock(mtxs[i]);
+		size += D_RO(container[i])->count;
+	}
+
+	cnt = size;
 
 	return status::OK;
 }
@@ -575,7 +588,10 @@ status robinhood::get_all(get_kv_callback *callback, void *arg)
 	LOG("get_all");
 	check_outside_tx();
 
-	hm_rp_foreach(pmpool.handle(), container, callback, arg);
+	for (size_t i = 0; i < SHARDS; ++i) {
+		shared_lock_type lock(mtxs[i]);
+		hm_rp_foreach(pmpool.handle(), container[i], callback, arg);
+	}
 
 	return status::OK;
 }
@@ -585,10 +601,13 @@ status robinhood::exists(string_view key)
 	LOG("exists for key=" << std::string(key.data(), key.size()));
 	check_outside_tx();
 
+	auto shard = hash(key);
+	shared_lock_type lock(mtxs[shard]);
+
 	auto k = *((uint64_t *)key.data());
 
-	return hm_rp_lookup(pmpool.handle(), container, k) == 0 ? status::NOT_FOUND
-								: status::OK;
+	return hm_rp_lookup(pmpool.handle(), container[shard], k) == 0 ? status::NOT_FOUND
+								       : status::OK;
 }
 
 status robinhood::get(string_view key, get_v_callback *callback, void *arg)
@@ -596,11 +615,14 @@ status robinhood::get(string_view key, get_v_callback *callback, void *arg)
 	LOG("get key=" << std::string(key.data(), key.size()));
 	check_outside_tx();
 
+	auto shard = hash(key);
+	shared_lock_type lock(mtxs[shard]);
+
 	auto k = *((uint64_t *)key.data());
 
-	auto result = hm_rp_get(pmpool.handle(), container, k);
+	auto result = hm_rp_get(pmpool.handle(), container[shard], k);
 
-	if (result == 0) {
+	if (result == std::numeric_limits<uint64_t>::max()) {
 		LOG("  key not found");
 		return status::NOT_FOUND;
 	}
@@ -616,10 +638,13 @@ status robinhood::put(string_view key, string_view value)
 		       << ", value.size=" << std::to_string(value.size()));
 	check_outside_tx();
 
+	auto shard = hash(key);
+	unique_lock_type lock(mtxs[shard]);
+
 	auto k = *((uint64_t *)key.data());
 	auto v = *((uint64_t *)value.data());
 
-	if (hm_rp_insert(pmpool.handle(), container, k, v) != 0)
+	if (hm_rp_insert(pmpool.handle(), container[shard], k, v, global_mtx) != 0)
 		return status::UNKNOWN_ERROR;
 
 	return status::OK;
@@ -630,11 +655,14 @@ status robinhood::remove(string_view key)
 	LOG("remove key=" << std::string(key.data(), key.size()));
 	check_outside_tx();
 
+	auto shard = hash(key);
+	unique_lock_type lock(mtxs[shard]);
+
 	auto k = *((uint64_t *)key.data());
 
-	auto result = hm_rp_remove(pmpool.handle(), container, k);
+	auto result = hm_rp_remove(pmpool.handle(), container[shard], k);
 
-	if (result == 0)
+	if (result == std::numeric_limits<uint64_t>::max())
 		return status::NOT_FOUND;
 
 	return status::OK;
@@ -643,14 +671,29 @@ status robinhood::remove(string_view key)
 void robinhood::Recover()
 {
 	if (!OID_IS_NULL(*root_oid)) {
-		container =
-			*(TOID(struct internal::robinhood::hashmap_rp) *)pmemobj_direct(
-				*root_oid);
+		auto pmem_ptr = static_cast<internal::robinhood::pmem_type *>(
+			pmemobj_direct(*root_oid));
+
+		container = pmem_ptr->map.get();
 	} else {
 		pmem::obj::transaction::run(pmpool, [&] {
+			pmem::obj::transaction::snapshot(root_oid);
+
 			int seed = 0; // ???
-			internal::robinhood::hm_rp_create(pmpool.handle(), &container,
-							  static_cast<void*>(&seed));
+
+			*root_oid = pmem::obj::make_persistent<
+					    internal::robinhood::pmem_type>()
+					    .raw();
+			auto pmem_ptr = static_cast<internal::robinhood::pmem_type *>(
+				pmemobj_direct(*root_oid));
+			pmem_ptr->map = obj::make_persistent<TOID(
+				struct internal::robinhood::hashmap_rp)[SHARDS]>();
+			container = pmem_ptr->map.get();
+
+			for (size_t i = 0; i < SHARDS; ++i)
+				internal::robinhood::hm_rp_create(
+					pmpool.handle(), &container[i],
+					static_cast<void *>(&seed));
 		});
 	}
 }
