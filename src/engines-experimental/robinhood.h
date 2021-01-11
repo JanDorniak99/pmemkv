@@ -66,7 +66,8 @@ TOID_DECLARE(struct entry, HASHMAP_RP_TYPE_OFFSET + 1);
 
 struct entry {
 	uint64_t key;
-	uint64_t value;
+	uint64_t value_lower;
+	uint64_t value_higher;
 
 	uint64_t hash;
 };

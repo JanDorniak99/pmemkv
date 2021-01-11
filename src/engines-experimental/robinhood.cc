@@ -138,15 +138,18 @@ static void entry_update(PMEMobjpool *pop, struct hashmap_rp *hashmap,
 
 	if (rebuild == HASHMAP_RP_REBUILD) {
 		entry_p->key = args->data.key;
-		entry_p->value = args->data.value;
+		entry_p->value_lower = args->data.value_lower;
+		entry_p->value_higher = args->data.value_higher;
 		entry_p->hash = args->data.hash;
 	} else {
 		pmemobj_set_value(pop, args->actv + args->actv_cnt++, &entry_p->key,
 				  args->data.key);
-		pmemobj_set_value(pop, args->actv + args->actv_cnt++, &entry_p->value,
-				  args->data.value);
-		pmemobj_set_value(pop, args->actv + args->actv_cnt++, &entry_p->value,
-				  args->data.value);
+		pmemobj_set_value(pop, args->actv + args->actv_cnt++,
+				  &entry_p->value_lower,
+				  args->data.value_lower);
+		pmemobj_set_value(pop, args->actv + args->actv_cnt++,
+				  &entry_p->value_higher,
+				  args->data.value_higher);
 		pmemobj_set_value(pop, args->actv + args->actv_cnt++, &entry_p->hash,
 				  args->data.hash);
 	}
@@ -181,7 +184,7 @@ static void entry_add(PMEMobjpool *pop, struct hashmap_rp *hashmap,
  * - -1 on error
  */
 static int insert_helper(PMEMobjpool *pop, struct hashmap_rp *hashmap, uint64_t key,
-			 uint64_t value, int rebuild)
+			 __uint128_t value, int rebuild)
 {
 	// HM_ASSERT(hashmap->count + 1 < hashmap->resize_threshold);
 
@@ -189,7 +192,8 @@ static int insert_helper(PMEMobjpool *pop, struct hashmap_rp *hashmap, uint64_t 
 
 	struct add_entry args;
 	args.data.key = key;
-	args.data.value = value;
+	args.data.value_lower = (uint64_t)value;
+	args.data.value_higher = (uint64_t)(value >> 64);
 	args.data.hash = hash(hashmap, key);
 	args.pos = args.data.hash;
 	if (rebuild != HASHMAP_RP_REBUILD) {
@@ -307,7 +311,11 @@ static int entries_cache(PMEMobjpool *pop, struct hashmap_rp *dest,
 		if (entry_is_empty(e->hash))
 			continue;
 
-		if (insert_helper(pop, dest, e->key, e->value, HASHMAP_RP_REBUILD) == -1)
+		__uint128_t val = e->value_higher;
+		val = val << 64;
+		val |= e->value_lower;
+
+		if (insert_helper(pop, dest, e->key, val, HASHMAP_RP_REBUILD) == -1)
 			return -1;
 	}
 	HM_ASSERT(src->count == dest->count);
@@ -429,7 +437,7 @@ int hm_rp_init(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap)
  * - -1 if something bad happened
  */
 int hm_rp_insert(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key,
-		 uint64_t value, std::shared_mutex &mtx)
+		 __uint128_t value, std::shared_mutex &mtx)
 {
 	if (D_RO(hashmap)->count + 1 >= D_RO(hashmap)->resize_threshold) {
 		std::unique_lock<std::shared_mutex> lock(mtx);
@@ -447,16 +455,19 @@ int hm_rp_insert(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key
  * - key's value if successful,
  * - OID_NULL if value didn't exist or if something bad happened
  */
-uint64_t hm_rp_remove(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key)
+__uint128_t hm_rp_remove(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key)
 {
 	const uint64_t pos = index_lookup(D_RO(hashmap), key);
 
 	if (pos == 0)
-		return std::numeric_limits<uint64_t>::max();
+		return std::numeric_limits<__uint128_t>::max();
 
 	struct entry *entry_p = D_RW(D_RW(hashmap)->entries);
 	entry_p += pos;
-	uint64_t ret = entry_p->value;
+
+	__uint128_t ret = entry_p->value_higher;
+	ret = ret << 64;
+	ret |= entry_p->value_lower;
 
 	size_t actvcnt = 0;
 
@@ -464,8 +475,8 @@ uint64_t hm_rp_remove(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_
 
 	pmemobj_set_value(pop, &actv[actvcnt++], &entry_p->hash,
 			  entry_p->hash | TOMBSTONE_MASK);
-	pmemobj_set_value(pop, &actv[actvcnt++], &entry_p->value, 0);
-	pmemobj_set_value(pop, &actv[actvcnt++], &entry_p->value, 0);
+	pmemobj_set_value(pop, &actv[actvcnt++], &entry_p->value_lower, 0);
+	pmemobj_set_value(pop, &actv[actvcnt++], &entry_p->value_higher, 0);
 	pmemobj_set_value(pop, &actv[actvcnt++], &entry_p->key, 0);
 	pmemobj_set_value(pop, &actv[actvcnt++], &D_RW(hashmap)->count,
 			  D_RW(hashmap)->count - 1);
@@ -488,13 +499,22 @@ uint64_t hm_rp_remove(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_
  * hm_rp_get -- checks whether specified key is in the hashmap.
  * Returns associated value if key exists, OID_NULL otherwise.
  */
-uint64_t hm_rp_get(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key)
+__uint128_t hm_rp_get(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap, uint64_t key)
 {
 	struct entry *entry_p =
 		(struct entry *)pmemobj_direct(D_RW(hashmap)->entries.oid);
 
 	uint64_t pos = index_lookup(D_RO(hashmap), key);
-	return pos == 0 ? std::numeric_limits<uint64_t>::max() : (entry_p + pos)->value;
+
+	if (pos == 0)
+		return std::numeric_limits<__uint128_t>::max();
+	else {
+		__uint128_t ret = (entry_p + pos)->value_higher;
+		ret = ret << 64;
+		ret |= (entry_p + pos)->value_lower;
+
+		return ret;
+	}
 }
 
 /*
@@ -524,7 +544,7 @@ int hm_rp_foreach(PMEMobjpool *pop, TOID(struct hashmap_rp) hashmap,
 			continue;
 
 		ret = cb(reinterpret_cast<const char *>(&(entry_p->key)), 8,
-			 reinterpret_cast<const char *>(&(entry_p->value)), 8, arg);
+			 reinterpret_cast<const char *>(&(entry_p->value_lower)), 8, arg); // not working with 16 bytes yet
 
 		if (ret)
 			return ret;
@@ -622,12 +642,12 @@ status robinhood::get(string_view key, get_v_callback *callback, void *arg)
 
 	auto result = hm_rp_get(pmpool.handle(), container[shard], k);
 
-	if (result == std::numeric_limits<uint64_t>::max()) {
+	if (result == std::numeric_limits<__uint128_t>::max()) {
 		LOG("  key not found");
 		return status::NOT_FOUND;
 	}
 
-	callback(reinterpret_cast<const char *>(&result), 8, arg);
+	callback(reinterpret_cast<const char *>(&result), 16, arg);
 
 	return status::OK;
 }
@@ -642,7 +662,7 @@ status robinhood::put(string_view key, string_view value)
 	unique_lock_type lock(mtxs[shard]);
 
 	auto k = *((uint64_t *)key.data());
-	auto v = *((uint64_t *)value.data());
+	auto v = *((__uint128_t *)value.data());
 
 	if (hm_rp_insert(pmpool.handle(), container[shard], k, v, global_mtx) != 0)
 		return status::UNKNOWN_ERROR;
@@ -662,7 +682,7 @@ status robinhood::remove(string_view key)
 
 	auto result = hm_rp_remove(pmpool.handle(), container[shard], k);
 
-	if (result == std::numeric_limits<uint64_t>::max())
+	if (result == std::numeric_limits<__uint128_t>::max())
 		return status::NOT_FOUND;
 
 	return status::OK;

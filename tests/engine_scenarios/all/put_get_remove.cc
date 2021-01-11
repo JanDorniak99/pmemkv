@@ -11,16 +11,20 @@ using namespace pmem::kv;
 
 static void SimpleTest(pmem::kv::db &kv)
 {
-	std::string value = "abcdefgh";
+	std::string value = "abcdefghijklmnopqrs";
 	ASSERT_STATUS(kv.put(value, value), status::OK);
 
 	std::string v1 = "";
 	ASSERT_STATUS(kv.get(value, &v1), status::OK);
 
-	std::cerr << std::hex << *(uint64_t *)(v1.data()) << std::endl;
-	std::cerr << std::hex << *(uint64_t *)(value.data()) << std::endl;
+	//std::cerr << "RESULTS:" << std::endl;
+	//std::cerr << std::hex << *(uint64_t *)(v1.data() + 8) << *(uint64_t *)(v1.data())
+	//	  << std::endl;
+	//std::cerr << std::hex << *(uint64_t *)(value.data() + 8)
+	//	  << *(uint64_t *)(value.data()) << std::endl;
 
-	UT_ASSERT(*(uint64_t *)(v1.data()) == *(uint64_t *)(value.data()));
+	// UT_ASSERT(*(__uint128_t *)(v1.data()) == *(__uint128_t *)(value.data()));
+	UT_ASSERT(0);
 }
 
 static void EmptyKeyTest(pmem::kv::db &kv)
