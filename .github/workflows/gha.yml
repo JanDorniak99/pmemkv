@@ -8,8 +8,8 @@ env:
   CONTAINER_REG:  ghcr.io/pmem/pmemkv
   HOST_WORKDIR:   ${{ github.workspace }}
   WORKDIR:        utils/docker
-  TEST_TIMEOUT:   600
   IMG_VER:        latest
+  TEST_TIMEOUT:   10000
 
 jobs:
   linux:
@@ -22,17 +22,7 @@ jobs:
       FORCE_IMAGE_ACTION:   ${{ secrets.FORCE_IMAGE_ACTION }}
     strategy:
       matrix:
-        CONFIG: ["TYPE=debug OS=fedora OS_VER=32",
-                 "TYPE=debug OS=ubuntu OS_VER=20.10 PUSH_IMAGE=1",
-                 "TYPE=debug OS=ubuntu OS_VER=20.04 CHECK_CPP_STYLE=1 COVERAGE=1",
-                 "TYPE=release OS=fedora OS_VER=32",
-                 "TYPE=release OS=ubuntu OS_VER=20.04",
-                 "TYPE=valgrind OS=ubuntu OS_VER=20.04",
-                 "TYPE=memcheck_drd OS=ubuntu OS_VER=20.04",
-                 "TYPE=building OS=fedora OS_VER=32 PUSH_IMAGE=1",
-                 "TYPE=building OS=ubuntu OS_VER=20.04 PUSH_IMAGE=1 COVERAGE=1 ",
-                 "TYPE=compatibility OS=fedora OS_VER=32",
-                 "TYPE=bindings OS=ubuntu OS_VER=20.04_bindings PUSH_IMAGE=1"]
+        CONFIG: ["TYPE=valgrind OS=ubuntu OS_VER=20.04"]
     steps:
       - name: Clone the git repo
         uses: actions/checkout@v2
